@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nursing Documentation Audit System — Dallah Hospital Namar</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--navy:#0a2342;--navy-light:#1a3a5c;--navy-dark:#061628;--white:#fff;--g50:#f8fafc;--g100:#f1f5f9;--g200:#e2e8f0;--g300:#cbd5e1;--g400:#94a3b8;--g500:#64748b;--g600:#475569;--g700:#334155;--g800:#1e293b;--green:#16a34a;--green-l:#dcfce7;--red:#dc2626;--red-l:#fee2e2;--yellow:#d97706;--yellow-l:#fef3c7;--blue:#2563eb;--blue-l:#dbeafe;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--g100);color:var(--g800);min-height:100vh;display:flex;flex-direction:column;}
+/* NAV */
+.navbar{background:var(--navy);color:#fff;padding:0 1.5rem;display:flex;align-items:center;justify-content:space-between;min-height:60px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.35);flex-wrap:wrap;gap:.5rem;}
+.brand{display:flex;flex-direction:column;padding:.5rem 0;}
+.brand .hosp{font-size:.65rem;opacity:.65;text-transform:uppercase;letter-spacing:1.2px;}
+.brand .app{font-size:.95rem;font-weight:700;}
+.nav-links{display:flex;gap:.15rem;flex-wrap:wrap;}
+.nav-btn{background:transparent;color:rgba(255,255,255,.78);border:none;padding:.45rem .85rem;border-radius:6px;cursor:pointer;font-size:.83rem;transition:all .15s;}
+.nav-btn:hover,.nav-btn.active{background:rgba(255,255,255,.16);color:#fff;}
+/* LAYOUT */
+.page{display:none;padding:1.5rem;max-width:1240px;margin:0 auto;width:100%;}
+.page.active{display:block;}
+/* CARDS */
+.card{background:#fff;border-radius:10px;padding:1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:1.5rem;}
+.card-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;padding-bottom:.75rem;border-bottom:2px solid var(--g100);}
+.card-title{font-size:1.05rem;font-weight:600;color:var(--navy);}
+/* BUTTONS */
+.btn{padding:.48rem 1.2rem;border-radius:6px;border:none;cursor:pointer;font-size:.85rem;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:.35rem;text-decoration:none;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--navy);color:#fff;}.btn-primary:hover:not(:disabled){background:var(--navy-light);}
+.btn-success{background:var(--green);color:#fff;}.btn-success:hover:not(:disabled){background:#15803d;}
+.btn-danger{background:var(--red);color:#fff;}.btn-danger:hover:not(:disabled){background:#b91c1c;}
+.btn-secondary{background:var(--g200);color:var(--g700);}.btn-secondary:hover:not(:disabled){background:var(--g300);}
+.btn-outline{background:transparent;border:1px solid var(--g300);color:var(--g700);}.btn-outline:hover:not(:disabled){background:var(--g100);}
+.btn-sm{padding:.28rem .7rem;font-size:.78rem;}
+.btn-lg{padding:.72rem 2rem;font-size:1rem;}
+/* FORMS */
+.form-group{margin-bottom:1rem;}
+.form-label{display:block;font-size:.85rem;font-weight:500;color:var(--g700);margin-bottom:.35rem;}
+.req{color:var(--red);}
+input[type=text],input[type=date],input[type=password],select,textarea{width:100%;padding:.48rem .75rem;border:1px solid var(--g300);border-radius:6px;font-size:.88rem;color:var(--g800);background:#fff;transition:border-color .15s;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(10,35,66,.12);}
+/* PROGRESS */
+.prog-wrap{margin-bottom:1.5rem;}
+.prog-labels{display:flex;justify-content:space-between;font-size:.78rem;color:var(--g500);margin-bottom:.35rem;}
+.prog-bg{background:var(--g200);border-radius:999px;height:8px;}
+.prog-fill{background:var(--navy);border-radius:999px;height:8px;transition:width .3s;}
+/* STEP INDICATOR */
+.steps{display:flex;align-items:center;justify-content:center;margin-bottom:2rem;overflow-x:auto;padding:.5rem 0;}
+.step-item{display:flex;flex-direction:column;align-items:center;gap:.3rem;}
+.step-circle{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;border:2px solid var(--g300);background:#fff;color:var(--g400);transition:all .2s;z-index:1;}
+.step-item.s-active .step-circle{border-color:var(--navy);background:var(--navy);color:#fff;}
+.step-item.s-done .step-circle{border-color:var(--green);background:var(--green);color:#fff;}
+.step-lbl{font-size:.68rem;color:var(--g500);text-align:center;max-width:72px;white-space:nowrap;}
+.step-item.s-active .step-lbl{color:var(--navy);font-weight:600;}
+.step-line{width:36px;height:2px;background:var(--g300);margin-bottom:20px;}
+.step-line.done{background:var(--green);}
+/* AUDIT ITEMS */
+.audit-item{display:flex;align-items:center;justify-content:space-between;padding:.85rem 1rem;border:1px solid var(--g200);border-radius:8px;margin-bottom:.5rem;background:var(--g50);gap:1rem;transition:background .15s;}
+.audit-item.answered{background:#fff;}
+.audit-item-text{flex:1;font-size:.88rem;line-height:1.45;}
+.mand-badge{font-size:.68rem;background:var(--yellow-l);color:var(--yellow);padding:1px 5px;border-radius:3px;margin-left:6px;}
+.resp-grp{display:flex;gap:.35rem;flex-shrink:0;}
+.resp-btn{padding:.28rem .72rem;border-radius:5px;border:1.5px solid var(--g300);background:#fff;cursor:pointer;font-size:.78rem;font-weight:700;transition:all .15s;color:var(--g600);}
+.resp-btn:hover{transform:translateY(-1px);}
+.resp-btn.sel-yes{background:var(--green);border-color:var(--green);color:#fff;}
+.resp-btn.sel-no{background:var(--red);border-color:var(--red);color:#fff;}
+.resp-btn.sel-na{background:var(--g400);border-color:var(--g400);color:#fff;}
+/* TABLE */
+.tbl{width:100%;border-collapse:collapse;font-size:.85rem;}
+.tbl th{background:var(--navy);color:#fff;padding:.7rem 1rem;text-align:left;font-weight:500;white-space:nowrap;}
+.tbl td{padding:.7rem 1rem;border-bottom:1px solid var(--g200);vertical-align:middle;}
+.tbl tbody tr:hover td{background:var(--g50);cursor:pointer;}
+.tbl tbody tr:last-child td{border-bottom:none;}
+/* BADGES */
+.badge{display:inline-block;padding:.18rem .55rem;border-radius:999px;font-size:.78rem;font-weight:600;}
+.b-high{background:var(--green-l);color:var(--green);}
+.b-med{background:var(--yellow-l);color:var(--yellow);}
+.b-low{background:var(--red-l);color:var(--red);}
+.b-na{background:var(--g200);color:var(--g500);}
+.b-blue{background:var(--blue-l);color:var(--blue);}
+/* STAT CARDS */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem;}
+.stat-card{background:#fff;border-radius:10px;padding:1.25rem 1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.08);border-left:4px solid var(--navy);}
+.stat-card.green{border-left-color:var(--green);}
+.stat-card.red{border-left-color:var(--red);}
+.stat-card.yellow{border-left-color:var(--yellow);}
+.stat-num{font-size:2.2rem;font-weight:700;color:var(--navy);line-height:1;}
+.stat-lbl{font-size:.78rem;color:var(--g500);margin-top:.35rem;}
+/* TOAST */
+.toast-wrap{position:fixed;top:72px;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem;pointer-events:none;}
+.toast{background:var(--g800);color:#fff;padding:.72rem 1.2rem;border-radius:8px;font-size:.85rem;box-shadow:0 4px 12px rgba(0,0,0,.25);animation:tIn .2s ease;display:flex;align-items:center;gap:.5rem;min-width:200px;max-width:340px;pointer-events:auto;}
+.toast.t-ok{border-left:4px solid var(--green);}
+.toast.t-err{border-left:4px solid var(--red);}
+.toast.t-info{border-left:4px solid var(--blue);}
+@keyframes tIn{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes tOut{from{transform:translateX(0);opacity:1}to{transform:translateX(110%);opacity:0}}
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.52);display:none;align-items:center;justify-content:center;z-index:1000;padding:1rem;}
+.overlay.open{display:flex;}
+.modal{background:#fff;border-radius:12px;padding:2rem;max-width:500px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto;}
+.modal-title{font-size:1.05rem;font-weight:600;margin-bottom:1rem;color:var(--navy);}
+.modal-footer{display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.5rem;}
+/* ADMIN */
+.admin-tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1.5rem;border-bottom:2px solid var(--g200);padding-bottom:.75rem;}
+.atab{padding:.45rem 1rem;border-radius:6px;border:1.5px solid var(--g300);background:#fff;cursor:pointer;font-size:.85rem;transition:all .15s;}
+.atab.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+.item-row{display:flex;align-items:center;gap:.5rem;padding:.6rem .75rem;border:1px solid var(--g200);border-radius:6px;margin-bottom:.4rem;background:var(--g50);}
+.item-row .item-text{flex:1;font-size:.85rem;}
+.item-row .item-acts{display:flex;gap:.3rem;flex-shrink:0;}
+/* SCENARIO CARDS */
+.scen-card{border:2px solid var(--g200);border-radius:8px;padding:1rem 1.25rem;cursor:pointer;transition:all .15s;margin-bottom:.75rem;display:flex;align-items:center;gap:1rem;}
+.scen-card:hover:not(.sc-done){border-color:var(--navy);background:var(--blue-l);}
+.scen-card.sc-selected{border-color:var(--navy);background:var(--blue-l);}
+.scen-card.sc-done{border-color:var(--green);background:var(--green-l);cursor:default;opacity:.75;}
+.scen-icon{width:36px;height:36px;border-radius:50%;background:var(--g200);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;}
+.sc-done .scen-icon{background:var(--green-l);}
+/* CHARTS */
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:1.5rem;}
+.chart-box{background:#fff;border-radius:10px;padding:1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.chart-box h3{font-size:.92rem;font-weight:600;color:var(--navy);margin-bottom:1rem;}
+.chart-wrap{position:relative;height:260px;}
+/* FILTERS */
+.filter-row{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;align-items:flex-end;}
+.filter-row .form-group{margin-bottom:0;min-width:140px;}
+/* MISC */
+.empty{text-align:center;padding:3rem 1rem;color:var(--g400);}
+.empty .ei{font-size:2.5rem;margin-bottom:.75rem;}
+.section-title{font-size:1.15rem;font-weight:700;color:var(--navy);margin-bottom:1.25rem;}
+.divider{border:none;border-top:1px solid var(--g200);margin:1.5rem 0;}
+.flex-row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;}
+.tag{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.75rem;font-weight:500;background:var(--blue-l);color:var(--blue);}
+.audit-detail-table{width:100%;border-collapse:collapse;font-size:.83rem;margin-top:.75rem;}
+.audit-detail-table th{background:var(--g100);color:var(--g700);padding:.5rem .75rem;text-align:left;font-weight:600;}
+.audit-detail-table td{padding:.5rem .75rem;border-bottom:1px solid var(--g200);}
+footer{text-align:center;padding:1.25rem;color:var(--g400);font-size:.78rem;border-top:1px solid var(--g200);margin-top:auto;}
+.adm-link{color:var(--g300);cursor:pointer;text-decoration:none;}
+.adm-link:hover{color:var(--g500);}
+/* SUMMARY */
+.summary-form-row{display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;border-bottom:1px solid var(--g200);gap:.5rem;}
+.summary-form-row:last-child{border-bottom:none;}
+.summary-form-name{font-size:.85rem;flex:1;}
+/* PRINT */
+@media print{
+  .navbar,.no-print,footer{display:none!important;}
+  .page{display:block!important;padding:0;}
+  body{background:#fff;}
+  .card{box-shadow:none;border:1px solid #ddd;}
+}
+@media(max-width:700px){
+  .audit-item{flex-direction:column;align-items:flex-start;}
+  .resp-grp{width:100%;justify-content:flex-end;}
+  .chart-grid{grid-template-columns:1fr;}
+  .filter-row{flex-direction:column;}
+  .filter-row .form-group{width:100%;}
+  .stat-grid{grid-template-columns:repeat(2,1fr);}
+}
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="brand">
+    <span class="hosp">Dallah Hospital Namar</span>
+    <span class="app">Nursing Documentation Audit System</span>
+  </div>
+  <div class="nav-links">
+    <button class="nav-btn active" onclick="nav('home')">Dashboard</button>
+    <button class="nav-btn" onclick="nav('audit')">New Audit</button>
+    <button class="nav-btn" onclick="nav('history')">History</button>
+    <button class="nav-btn" onclick="nav('reports')">Reports</button>
+  </div>
+</nav>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<!-- HOME -->
+<div class="page active" id="page-home">
+  <div id="homeContent"></div>
+</div>
+
+<!-- AUDIT -->
+<div class="page" id="page-audit">
+  <div id="auditContent"></div>
+</div>
+
+<!-- HISTORY -->
+<div class="page" id="page-history">
+  <div id="historyContent"></div>
+</div>
+
+<!-- REPORTS -->
+<div class="page" id="page-reports">
+  <div id="reportsContent"></div>
+</div>
+
+<!-- ADMIN -->
+<div class="page" id="page-admin">
+  <div id="adminContent"></div>
+</div>
+
+<footer>
+  <span>© 2025 Dallah Hospital Namar — Nursing Documentation Audit System</span>
+  &nbsp;|&nbsp;
+  <span class="adm-link" onclick="openAdminLogin()">Admin</span>
+</footer>
+
+<script>
+// =====================================================================
+// 1. DEFAULT DATA
+// =====================================================================
+const DEF_FORMS = [
+  { id:'f1', name:'Nursing Initial Assessment', items:[
+    {id:'f1i1',text:'Initiated within 2 hours of admission?',mandatory:false},
+    {id:'f1i2',text:'Completed within 24 hours?',mandatory:false},
+    {id:'f1i3',text:'All sections filled (history, allergies, physical exam)?',mandatory:false}
+  ]},
+  { id:'f2', name:'Nursing Initial Care Plan', items:[
+    {id:'f2i1',text:'Initiated within 24 hours of admission?',mandatory:false},
+    {id:'f2i2',text:'Nursing diagnoses documented?',mandatory:false},
+    {id:'f2i3',text:'Goals are measurable and patient-specific?',mandatory:false},
+    {id:'f2i4',text:'Interventions linked to diagnoses?',mandatory:false}
+  ]},
+  { id:'f3', name:'Nursing Care Plan', items:[
+    {id:'f3i1',text:'Updated each shift?',mandatory:false},
+    {id:'f3i2',text:'Reflects current patient condition?',mandatory:false},
+    {id:'f3i3',text:'Goals evaluated and revised as needed?',mandatory:false},
+    {id:'f3i4',text:'Interventions documented and realistic?',mandatory:false}
+  ]},
+  { id:'f4', name:'Daily Skin Assessment (Braden Scale / Modified Braden Q)', items:[
+    {id:'f4i1',text:'Braden/Braden Q scale completed?',mandatory:false},
+    {id:'f4i2',text:'Total score documented?',mandatory:false},
+    {id:'f4i3',text:'Date & time recorded?',mandatory:false},
+    {id:'f4i4',text:'Preventive interventions documented if high risk?',mandatory:false}
+  ]},
+  { id:'f5', name:'Fall Risk Assessment', items:[
+    {id:'f5i1',text:'Score calculated and documented?',mandatory:false},
+    {id:'f5i2',text:'Risk level identified (low / medium / high)?',mandatory:false},
+    {id:'f5i3',text:'Preventive measures documented per risk level?',mandatory:false},
+    {id:'f5i4',text:'Reassessment done after fall or change in condition?',mandatory:false}
+  ]},
+  { id:'f6', name:'Pain Assessment', items:[
+    {id:'f6i1',text:'Appropriate scale used (NRS / FLACC / Wong-Baker)?',mandatory:false},
+    {id:'f6i2',text:'Pain score documented?',mandatory:false},
+    {id:'f6i3',text:'Time of assessment recorded?',mandatory:false},
+    {id:'f6i4',text:'Reassessment after intervention documented?',mandatory:false}
+  ]},
+  { id:'f7', name:'Nursing SBAR Form', items:[
+    {id:'f7i1',text:'Situation section completed?',mandatory:false},
+    {id:'f7i2',text:'Background section completed?',mandatory:false},
+    {id:'f7i3',text:'Assessment section completed?',mandatory:false},
+    {id:'f7i4',text:'Recommendation section completed?',mandatory:false}
+  ]},
+  { id:'f8', name:'Patient Teaching Record', items:[
+    {id:'f8i1',text:'Teaching topic documented?',mandatory:false},
+    {id:'f8i2',text:'Method of teaching recorded (verbal / written / demonstration)?',mandatory:false},
+    {id:'f8i3',text:'Patient/family understanding assessed?',mandatory:false},
+    {id:'f8i4',text:'Patient/family signature present?',mandatory:false}
+  ]},
+  { id:'f9', name:'Nursing Shift Assessment / Flow Sheet', items:[
+    {id:'f9i1',text:'Completed for every shift (morning / evening / night)?',mandatory:false},
+    {id:'f9i2',text:'All body systems assessed?',mandatory:false},
+    {id:'f9i3',text:'Abnormal findings documented?',mandatory:false}
+  ]},
+  { id:'f10', name:'Vital Signs', items:[
+    {id:'f10i1',text:'All parameters recorded (HR, BP, RR, Temp, SpO₂)?',mandatory:false},
+    {id:'f10i2',text:'Frequency appropriate to patient condition?',mandatory:false},
+    {id:'f10i3',text:'Abnormal values flagged / followed up?',mandatory:false},
+    {id:'f10i4',text:'Time of each recording documented?',mandatory:false}
+  ]},
+  { id:'f11', name:'Nurses Notes', items:[
+    {id:'f11i1',text:'Entries present for each shift?',mandatory:false},
+    {id:'f11i2',text:'Notes reflect patient condition and response to treatment?',mandatory:false},
+    {id:'f11i3',text:'Continuity maintained between shifts?',mandatory:false},
+    {id:'f11i4',text:'Each entry signed, dated & timed?',mandatory:false}
+  ]}
+];
+
+const DEF_SCENARIOS = [
+  { id:'s1', name:'Operative Patient (ASC.7 / COP.4)', items:[
+    {id:'s1i1',text:'Pre-Op Nursing Assessment & Checklist completed?',mandatory:false},
+    {id:'s1i2',text:'Nursing verification of surgical site / consent?',mandatory:false},
+    {id:'s1i3',text:'Intra-operative Nursing Record documented (sponge, sharp count)?',mandatory:false},
+    {id:'s1i4',text:'PACU Nursing Assessment at arrival & q15min?',mandatory:false},
+    {id:'s1i5',text:'Post-Op Nursing Care Plan initiated?',mandatory:false}
+  ]},
+  { id:'s2', name:'Blood Transfusion (COP.3.3)', items:[
+    {id:'s2i1',text:'Nursing 2-identifier verification documented pre-transfusion?',mandatory:false},
+    {id:'s2i2',text:'Baseline vitals recorded before starting?',mandatory:false},
+    {id:'s2i3',text:'Vitals monitored & documented q15 min during transfusion?',mandatory:false},
+    {id:'s2i4',text:'Nursing note: patient response & any reaction observed?',mandatory:false},
+    {id:'s2i5',text:'Transfusion completion note with total volume & outcome?',mandatory:false}
+  ]},
+  { id:'s3', name:'Anaesthesia / Conscious Sedation (ASC.5 / ASC.6)', items:[
+    {id:'s3i1',text:'Nursing pre-sedation assessment documented?',mandatory:false},
+    {id:'s3i2',text:'Continuous monitoring record (SpO₂, HR, BP, RR, LOC)?',mandatory:false},
+    {id:'s3i3',text:'Nursing note during procedure — response & tolerance?',mandatory:false},
+    {id:'s3i4',text:'Post-procedure nursing recovery assessment?',mandatory:false},
+    {id:'s3i5',text:'Discharge / transfer criteria met — documented by nurse?',mandatory:false}
+  ]},
+  { id:'s4', name:'Physical Restraint (COP.3.2 / PFR.1.4)', items:[
+    {id:'s4i1',text:'Nursing assessment justifying need for restraint?',mandatory:false},
+    {id:'s4i2',text:'Therapeutic Immobilisation Observation Record (q2h)?',mandatory:false},
+    {id:'s4i3',text:'Skin integrity, circulation & behaviour documented q2h?',mandatory:false},
+    {id:'s4i4',text:'Release intervals & response to release recorded?',mandatory:false},
+    {id:'s4i5',text:'Patient / family education on restraint — nursing note?',mandatory:false}
+  ]},
+  { id:'s5', name:'Isolation / Infection Control Bundles (PCI.7 / PCI.9)', items:[
+    {id:'s5i1',text:'Isolation order reflected in chart?',mandatory:false},
+    {id:'s5i2',text:'CAUTI Bundle Checklist (insertion + daily)?',mandatory:false},
+    {id:'s5i3',text:'CLABSI Bundle Checklist (insertion + daily)?',mandatory:false},
+    {id:'s5i4',text:'MDRO Bundle Checklist?',mandatory:false},
+    {id:'s5i5',text:'Ventilator Bundle (Adult / Pedia/Neonatal)?',mandatory:false}
+  ]},
+  { id:'s6', name:'Patient Transfer — Inter/Intra-hospital (ACC.4 / COP.8.1)', items:[
+    {id:'s6i1',text:'Nursing SBAR completed & handed over to receiving nurse?',mandatory:false},
+    {id:'s6i2',text:'Pre-transfer nursing assessment documented?',mandatory:false},
+    {id:'s6i3',text:'Vital signs at time of transfer recorded?',mandatory:false},
+    {id:'s6i4',text:'IV access, lines, drains — status documented by nurse?',mandatory:false},
+    {id:'s6i5',text:'Receiving nurse assessment within 1 hr of arrival?',mandatory:false}
+  ]}
+];
+
+const DEF_UNITS = [
+  {id:'u1',name:'L3Z1',isOther:false},
+  {id:'u2',name:'L3Z2',isOther:false},
+  {id:'u3',name:'L3Z3',isOther:false},
+  {id:'u4',name:'L5Z1',isOther:false},
+  {id:'u5',name:'L5Z3',isOther:false},
+  {id:'u6',name:'Other',isOther:true}
+];
+
+const DEF_SETTINGS = { adminPassword:'admin123', defaultReviewer:'Waleed Sayed' };
+const DEF_USERS = ['Waleed Sayed'];
+
+// =====================================================================
+// 2. STORAGE
+// =====================================================================
+const S = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); } catch{ return null; } },
+  set(k,v){ localStorage.setItem(k,JSON.stringify(v)); },
+  forms(){ return S.get('nda_forms') || DEF_FORMS; },
+  scenarios(){ return S.get('nda_scenarios') || DEF_SCENARIOS; },
+  units(){ return S.get('nda_units') || DEF_UNITS; },
+  audits(){ return S.get('nda_audits') || []; },
+  settings(){ return S.get('nda_settings') || DEF_SETTINGS; },
+  users(){ return S.get('nda_users') || DEF_USERS; },
+  saveAudit(a){ const arr=S.audits(); arr.push(a); S.set('nda_audits',arr); },
+  deleteAudit(id){ S.set('nda_audits', S.audits().filter(a=>a.id!==id)); }
+};
+
+// =====================================================================
+// 3. APP STATE
+// =====================================================================
+let currentPage = 'home';
+let isAdmin = false;
+let adminSection = 'forms';
+let CA = null; // current audit state
+let chartInstances = {};
+
+// =====================================================================
+// 4. INIT
+// =====================================================================
+function initData(){
+  if(!S.get('nda_forms')) S.set('nda_forms', DEF_FORMS);
+  if(!S.get('nda_scenarios')) S.set('nda_scenarios', DEF_SCENARIOS);
+  if(!S.get('nda_units')) S.set('nda_units', DEF_UNITS);
+  if(!S.get('nda_audits')) S.set('nda_audits', []);
+  if(!S.get('nda_settings')) S.set('nda_settings', DEF_SETTINGS);
+  if(!S.get('nda_users')) S.set('nda_users', DEF_USERS);
+}
+
+// =====================================================================
+// 5. NAVIGATION
+// =====================================================================
+function nav(page){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b=>{ if(b.textContent.trim().toLowerCase().startsWith(page==='home'?'dash':page==='audit'?'new':page)) b.classList.add('active'); });
+  currentPage = page;
+  if(page==='home') renderHome();
+  else if(page==='audit') renderAuditStart();
+  else if(page==='history') renderHistory();
+  else if(page==='reports') renderReports();
+  else if(page==='admin') renderAdmin();
+  window.scrollTo(0,0);
+}
+
+// =====================================================================
+// 6. UTILITIES
+// =====================================================================
+function esc(s){ return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2); }
+function today(){ return new Date().toISOString().slice(0,10); }
+function fmtDate(d){ if(!d) return ''; try{ return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); } catch{ return d; } }
+
+function calcCompliance(responses){
+  let yes=0,no=0;
+  Object.values(responses||{}).forEach(r=>{ if(r==='yes') yes++; else if(r==='no') no++; });
+  if(yes+no===0) return null;
+  return (yes/(yes+no))*100;
+}
+
+function calcFormCompliance(formId, coreResponses){
+  const r = coreResponses[formId] || {};
+  return calcCompliance(r);
+}
+
+function compClass(pct){ if(pct===null) return 'b-na'; if(pct>=80) return 'b-high'; if(pct>=60) return 'b-med'; return 'b-low'; }
+function fmtPct(pct){ if(pct===null) return 'N/A'; return pct.toFixed(1)+'%'; }
+
+function calcAuditCompliance(audit){
+  let yes=0,no=0;
+  Object.values(audit.coreResponses||{}).forEach(fr=>Object.values(fr).forEach(r=>{ if(r==='yes') yes++; else if(r==='no') no++; }));
+  Object.values(audit.scenarioResponses||{}).forEach(sr=>Object.values(sr).forEach(r=>{ if(r==='yes') yes++; else if(r==='no') no++; }));
+  if(yes+no===0) return null;
+  return (yes/(yes+no))*100;
+}
+
+function calcCoreCompliance(audit){
+  let yes=0,no=0;
+  Object.values(audit.coreResponses||{}).forEach(fr=>Object.values(fr).forEach(r=>{ if(r==='yes') yes++; else if(r==='no') no++; }));
+  if(yes+no===0) return null;
+  return (yes/(yes+no))*100;
+}
+
+// Toast
+function toast(msg, type='info'){
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = `toast t-${type}`;
+  el.innerHTML = (type==='ok'?'✓':type==='err'?'✕':'ℹ')+' <span>'+esc(msg)+'</span>';
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.animation='tOut .25s ease forwards'; setTimeout(()=>el.remove(),260); },3000);
+}
+
+// Modal
+function showModal(html){
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('overlay').classList.add('open');
+}
+function hideModal(){ document.getElementById('overlay').classList.remove('open'); }
+document.getElementById('overlay').addEventListener('click',function(e){ if(e.target===this) hideModal(); });
+
+function confirmDialog(msg, onYes, title='Confirm'){
+  showModal(`<div class="modal-title">${esc(title)}</div><p style="font-size:.9rem;color:var(--g600)">${esc(msg)}</p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="hideModal();(${onYes.toString()})()">Confirm</button>
+    </div>`);
+}
+
+// =====================================================================
+// 7. HOME PAGE
+// =====================================================================
+function renderHome(){
+  const audits = S.audits();
+  const total = audits.length;
+  const compliances = audits.map(a=>calcAuditCompliance(a)).filter(x=>x!==null);
+  const avg = compliances.length ? compliances.reduce((a,b)=>a+b,0)/compliances.length : null;
+  const thisMonth = audits.filter(a=>a.date && a.date.slice(0,7)===today().slice(0,7)).length;
+  const units = new Set(audits.map(a=>a.unitDisplay)).size;
+
+  const recent = audits.slice(-5).reverse();
+  let recentRows = recent.map(a=>{
+    const c=calcAuditCompliance(a);
+    return `<tr onclick="viewAudit('${esc(a.id)}')" style="cursor:pointer">
+      <td>${esc(fmtDate(a.date))}</td>
+      <td><strong>${esc(a.fileNumber)}</strong></td>
+      <td>${esc(a.unitDisplay)}</td>
+      <td>${esc(a.reviewer)}</td>
+      <td><span class="badge ${compClass(c)}">${fmtPct(c)}</span></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('homeContent').innerHTML = `
+    <div class="section-title">Dashboard</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-lbl">Total Audits</div></div>
+      <div class="stat-card green"><div class="stat-num">${fmtPct(avg)}</div><div class="stat-lbl">Average Compliance</div></div>
+      <div class="stat-card yellow"><div class="stat-num">${thisMonth}</div><div class="stat-lbl">Audits This Month</div></div>
+      <div class="stat-card"><div class="stat-num">${units}</div><div class="stat-lbl">Units Covered</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hdr">
+        <span class="card-title">Recent Audits</span>
+        <button class="btn btn-primary btn-sm no-print" onclick="nav('audit')">+ New Audit</button>
+      </div>
+      ${recent.length ? `<div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>Date</th><th>File No.</th><th>Unit</th><th>Reviewer</th><th>Compliance</th></tr></thead>
+        <tbody>${recentRows}</tbody>
+      </table></div>` : `<div class="empty"><div class="ei">📋</div><p>No audits yet. Start your first audit!</p></div>`}
+      ${total>5?`<div style="margin-top:1rem;text-align:right"><button class="btn btn-outline btn-sm" onclick="nav('history')">View All ${total} Audits →</button></div>`:''}
+    </div>`;
+}
+
+// =====================================================================
+// 8. AUDIT FLOW
+// =====================================================================
+function renderAuditStart(){
+  CA = { step:1, info:{}, coreResponses:{}, currentFormIdx:0, hasSpecial:null, completedScenarios:[], scenarioResponses:{}, currentScenarioId:null };
+  renderAuditStep();
+}
+
+function renderAuditStep(){
+  const el = document.getElementById('auditContent');
+  const forms = S.forms();
+  const scenarios = S.scenarios();
+  const stepLabels = ['Patient Info','Core Sheets','Special?','Scenarios','Summary'];
+  const stepDots = stepLabels.map((l,i)=>{
+    const n=i+1;
+    let cls='step-item';
+    if(n===CA.step) cls+=' s-active';
+    else if(n<CA.step) cls+=' s-done';
+    return (i>0?`<div class="step-line${n<=CA.step?' done':''}"></div>`:'')
+      +`<div class="${cls}"><div class="step-circle">${n<CA.step?'✓':n}</div><div class="step-lbl">${l}</div></div>`;
+  }).join('');
+
+  let body = '';
+  if(CA.step===1) body = renderStep1();
+  else if(CA.step===2) body = renderStep2(forms);
+  else if(CA.step===3) body = renderStep3();
+  else if(CA.step===4) body = renderStep4(scenarios);
+  else if(CA.step===5) body = renderStep5(forms, scenarios);
+
+  el.innerHTML = `<div class="section-title no-print">New Audit</div>
+    <div class="card no-print"><div class="steps">${stepDots}</div></div>
+    ${body}`;
+}
+
+// Step 1: Patient info
+function renderStep1(){
+  const settings = S.settings();
+  const units = S.units();
+  const info = CA.info;
+  const unitOpts = units.map(u=>`<option value="${esc(u.id)}" ${info.unitId===u.id?'selected':''}>${esc(u.name)}</option>`).join('');
+  const hasOtherSel = units.find(u=>u.id===info.unitId&&u.isOther);
+  return `<div class="card">
+    <div class="card-hdr"><span class="card-title">Step 1 — Patient Information</span></div>
+    <div style="max-width:520px">
+      <div class="form-group">
+        <label class="form-label">File Number <span class="req">*</span></label>
+        <input type="text" id="s1FileNo" value="${esc(info.fileNumber||'')}" placeholder="Enter file number">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unit <span class="req">*</span></label>
+        <select id="s1Unit" onchange="handleUnitChange()">
+          <option value="">— Select Unit —</option>${unitOpts}
+        </select>
+      </div>
+      <div class="form-group" id="s1OtherWrap" style="display:${hasOtherSel?'block':'none'}">
+        <label class="form-label">Specify Unit</label>
+        <input type="text" id="s1UnitCustom" value="${esc(info.unitCustom||'')}" placeholder="Enter unit name">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input type="date" id="s1Date" value="${esc(info.date||today())}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reviewer Name</label>
+        <input type="text" id="s1Reviewer" value="${esc(info.reviewer||settings.defaultReviewer||'')}">
+      </div>
+      <div class="flex-row" style="margin-top:1.5rem">
+        <button class="btn btn-primary btn-lg" onclick="submitStep1()">Next: Core Sheets →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function handleUnitChange(){
+  const units = S.units();
+  const sel = document.getElementById('s1Unit').value;
+  const unit = units.find(u=>u.id===sel);
+  document.getElementById('s1OtherWrap').style.display = (unit&&unit.isOther)?'block':'none';
+}
+
+function submitStep1(){
+  const fileNo = document.getElementById('s1FileNo').value.trim();
+  const unitId = document.getElementById('s1Unit').value;
+  const unitCustom = document.getElementById('s1UnitCustom')?document.getElementById('s1UnitCustom').value.trim():'';
+  const date = document.getElementById('s1Date').value;
+  const reviewer = document.getElementById('s1Reviewer').value.trim();
+  if(!fileNo){ toast('File number is required','err'); return; }
+  if(!unitId){ toast('Please select a unit','err'); return; }
+  const units = S.units();
+  const unitObj = units.find(u=>u.id===unitId);
+  const unitDisplay = unitObj ? (unitObj.isOther ? (unitCustom||'Other') : unitObj.name) : '';
+  CA.info = { fileNumber:fileNo, unitId, unitCustom, date:date||today(), reviewer:reviewer||'Unknown', unitDisplay };
+  CA.step = 2;
+  renderAuditStep();
+}
+
+// Step 2: Core forms
+function renderStep2(forms){
+  const idx = CA.currentFormIdx;
+  const form = forms[idx];
+  if(!form) return '<div class="card"><p>No forms configured.</p></div>';
+  const total = forms.length;
+  const pct = Math.round((idx/total)*100);
+  const responses = CA.coreResponses[form.id] || {};
+  const answeredCount = Object.values(responses).filter(r=>r).length;
+
+  const items = form.items.map(item=>{
+    const r = responses[item.id];
+    return `<div class="audit-item${r?' answered':''}" id="ai-${esc(item.id)}">
+      <div class="audit-item-text">${esc(item.text)}${item.mandatory?`<span class="mand-badge">Required</span>`:''}</div>
+      <div class="resp-grp">
+        <button class="resp-btn${r==='yes'?' sel-yes':''}" onclick="setResp('${esc(form.id)}','${esc(item.id)}','yes')">Yes</button>
+        <button class="resp-btn${r==='no'?' sel-no':''}" onclick="setResp('${esc(form.id)}','${esc(item.id)}','no')">No</button>
+        <button class="resp-btn${r==='na'?' sel-na':''}" onclick="setResp('${esc(form.id)}','${esc(item.id)}','na')">N/A</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="prog-wrap">
+      <div class="prog-labels"><span>Form ${idx+1} of ${total}</span><span>${answeredCount}/${form.items.length} answered</span></div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${pct}%"></div></div>
+    </div>
+    <div class="card-hdr">
+      <span class="card-title">${esc(form.name)}</span>
+      <span class="tag">${idx+1} / ${total}</span>
+    </div>
+    <div>${items}</div>
+    <div class="flex-row" style="margin-top:1.5rem;justify-content:space-between">
+      <button class="btn btn-secondary" onclick="coreNav(-1)">${idx>0?'← Previous':'← Back to Info'}</button>
+      <button class="btn btn-primary" onclick="coreNav(1)">${idx<total-1?'Next Form →':'All Done →'}</button>
+    </div>
+  </div>`;
+}
+
+function setResp(formId, itemId, val){
+  if(!CA.coreResponses[formId]) CA.coreResponses[formId]={};
+  CA.coreResponses[formId][itemId] = val;
+  // update UI without full re-render
+  const item = document.getElementById('ai-'+itemId);
+  if(item){
+    item.classList.add('answered');
+    item.querySelectorAll('.resp-btn').forEach(b=>{
+      b.className='resp-btn';
+      if(b.textContent.toLowerCase()===val||(val==='yes'&&b.textContent==='Yes')||(val==='no'&&b.textContent==='No')||(val==='na'&&b.textContent==='N/A')){
+        b.className='resp-btn sel-'+val;
+      }
+    });
+    // update answered count
+    const forms=S.forms();
+    const form=forms[CA.currentFormIdx];
+    if(form){
+      const responses=CA.coreResponses[form.id]||{};
+      const cnt=Object.values(responses).filter(r=>r).length;
+      const lbl=document.querySelector('.prog-labels span:last-child');
+      if(lbl) lbl.textContent=cnt+'/'+form.items.length+' answered';
+    }
+  }
+}
+
+function coreNav(dir){
+  const forms = S.forms();
+  const newIdx = CA.currentFormIdx + dir;
+  if(newIdx < 0){ CA.step=1; renderAuditStep(); return; }
+  if(newIdx >= forms.length){ CA.step=3; renderAuditStep(); return; }
+  CA.currentFormIdx = newIdx;
+  renderAuditStep();
+}
+
+// Step 3: Special situation
+function renderStep3(){
+  return `<div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+    <div class="card-hdr" style="justify-content:center;border:none"><span class="card-title" style="font-size:1.2rem">Does this patient have a special situation?</span></div>
+    <p style="color:var(--g500);margin-bottom:2rem;font-size:.9rem">Special situations include operative procedures, blood transfusion, sedation, restraint, isolation, or patient transfer.</p>
+    <div class="flex-row" style="justify-content:center;gap:1.5rem">
+      <button class="btn btn-success btn-lg" onclick="answerSpecial(true)">✓ Yes — Select Scenario</button>
+      <button class="btn btn-secondary btn-lg" onclick="answerSpecial(false)">✕ No — Proceed to Summary</button>
+    </div>
+    <div style="margin-top:1.5rem">
+      <button class="btn btn-outline btn-sm" onclick="CA.step=2;CA.currentFormIdx=S.forms().length-1;renderAuditStep()">← Back to Core Sheets</button>
+    </div>
+  </div>`;
+}
+
+function answerSpecial(val){
+  CA.hasSpecial = val;
+  if(val){ CA.step=4; CA.currentScenarioId=null; }
+  else { CA.step=5; }
+  renderAuditStep();
+}
+
+// Step 4: Scenarios
+function renderStep4(scenarios){
+  // If no scenario selected yet, show selection
+  if(!CA.currentScenarioId){
+    const cards = scenarios.map(s=>{
+      const done = CA.completedScenarios.includes(s.id);
+      return `<div class="scen-card${done?' sc-done':''}" onclick="${done?'':'selectScenario(\''+s.id+'\')'}">
+        <div class="scen-icon">${done?'✓':'📋'}</div>
+        <div>
+          <div style="font-weight:600;font-size:.9rem">${esc(s.name)}</div>
+          <div style="font-size:.78rem;color:var(--g500);margin-top:.2rem">${s.items.length} items${done?' — Completed':''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const anyDone = CA.completedScenarios.length>0;
+    return `<div class="card">
+      <div class="card-hdr"><span class="card-title">Step 4 — Select Scenario</span><span class="tag">${CA.completedScenarios.length} completed</span></div>
+      <p style="color:var(--g500);font-size:.87rem;margin-bottom:1.25rem">Select one scenario to audit. Already-completed scenarios are shown in green.</p>
+      ${cards}
+      <hr class="divider">
+      <div class="flex-row" style="justify-content:space-between">
+        <button class="btn btn-secondary" onclick="CA.step=3;renderAuditStep()">← Back</button>
+        ${anyDone?`<button class="btn btn-primary" onclick="CA.step=5;renderAuditStep()">Proceed to Summary →</button>`:''}
+      </div>
+    </div>`;
+  }
+
+  // Show selected scenario items
+  const scenario = scenarios.find(s=>s.id===CA.currentScenarioId);
+  if(!scenario) return '<div class="card"><p>Scenario not found.</p></div>';
+  const responses = CA.scenarioResponses[scenario.id] || {};
+  const answeredCount = Object.values(responses).filter(r=>r).length;
+
+  const items = scenario.items.map(item=>{
+    const r = responses[item.id];
+    return `<div class="audit-item${r?' answered':''}" id="sai-${esc(item.id)}">
+      <div class="audit-item-text">${esc(item.text)}</div>
+      <div class="resp-grp">
+        <button class="resp-btn${r==='yes'?' sel-yes':''}" onclick="setScenResp('${esc(scenario.id)}','${esc(item.id)}','yes')">Yes</button>
+        <button class="resp-btn${r==='no'?' sel-no':''}" onclick="setScenResp('${esc(scenario.id)}','${esc(item.id)}','no')">No</button>
+        <button class="resp-btn${r==='na'?' sel-na':''}" onclick="setScenResp('${esc(scenario.id)}','${esc(item.id)}','na')">N/A</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="card-hdr">
+      <span class="card-title">${esc(scenario.name)}</span>
+      <span style="font-size:.8rem;color:var(--g500)">${answeredCount}/${scenario.items.length} answered</span>
+    </div>
+    ${items}
+    <hr class="divider">
+    <div class="flex-row" style="justify-content:space-between">
+      <button class="btn btn-secondary" onclick="CA.currentScenarioId=null;renderAuditStep()">← Back to Scenarios</button>
+      <button class="btn btn-primary" onclick="finishScenario('${esc(scenario.id)}')">Complete Scenario →</button>
+    </div>
+  </div>`;
+}
+
+function selectScenario(id){ CA.currentScenarioId=id; renderAuditStep(); }
+
+function setScenResp(scenId, itemId, val){
+  if(!CA.scenarioResponses[scenId]) CA.scenarioResponses[scenId]={};
+  CA.scenarioResponses[scenId][itemId]=val;
+  const item=document.getElementById('sai-'+itemId);
+  if(item){
+    item.classList.add('answered');
+    item.querySelectorAll('.resp-btn').forEach(b=>{
+      b.className='resp-btn';
+      if((val==='yes'&&b.textContent==='Yes')||(val==='no'&&b.textContent==='No')||(val==='na'&&b.textContent==='N/A'))
+        b.className='resp-btn sel-'+val;
+    });
+  }
+}
+
+function finishScenario(id){
+  if(!CA.completedScenarios.includes(id)) CA.completedScenarios.push(id);
+  CA.currentScenarioId=null;
+  showModal(`<div class="modal-title">Scenario Completed</div>
+    <p style="font-size:.9rem;color:var(--g600);margin-bottom:1.5rem">Does this patient have another special situation to audit?</p>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal();CA.step=5;renderAuditStep()">No — Go to Summary</button>
+      <button class="btn btn-primary" onclick="hideModal();renderAuditStep()">Yes — Select Another</button>
+    </div>`);
+}
+
+// Step 5: Summary & Save
+function renderStep5(forms, scenarios){
+  const info = CA.info;
+  // Per-form compliance
+  let formRows = forms.map(f=>{
+    const r = CA.coreResponses[f.id]||{};
+    const c = calcCompliance(r);
+    const answered = Object.values(r).filter(x=>x).length;
+    return `<div class="summary-form-row">
+      <div class="summary-form-name">${esc(f.name)}</div>
+      <div style="font-size:.78rem;color:var(--g500);margin-right:.75rem">${answered}/${f.items.length} answered</div>
+      <span class="badge ${compClass(c)}">${fmtPct(c)}</span>
+    </div>`;
+  }).join('');
+
+  // Scenario rows
+  let scenRows = '';
+  if(CA.completedScenarios.length){
+    scenRows = CA.completedScenarios.map(sid=>{
+      const sc = scenarios.find(s=>s.id===sid);
+      if(!sc) return '';
+      const c = calcCompliance(CA.scenarioResponses[sid]||{});
+      return `<div class="summary-form-row">
+        <div class="summary-form-name">${esc(sc.name)}</div>
+        <span class="badge ${compClass(c)}">${fmtPct(c)}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const coreC = calcCoreCompliance(CA);
+  const totalC = calcAuditCompliance(CA);
+
+  return `<div class="card" id="printArea">
+    <div class="card-hdr no-print">
+      <span class="card-title">Step 5 — Audit Summary</span>
+      <button class="btn btn-outline btn-sm" onclick="window.print()">🖨 Print</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem">
+      <div><div style="font-size:.75rem;color:var(--g500)">File Number</div><div style="font-weight:600">${esc(info.fileNumber)}</div></div>
+      <div><div style="font-size:.75rem;color:var(--g500)">Unit</div><div style="font-weight:600">${esc(info.unitDisplay)}</div></div>
+      <div><div style="font-size:.75rem;color:var(--g500)">Date</div><div style="font-weight:600">${esc(fmtDate(info.date))}</div></div>
+      <div><div style="font-size:.75rem;color:var(--g500)">Reviewer</div><div style="font-weight:600">${esc(info.reviewer)}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:1.5rem">
+      <div style="text-align:center;background:var(--g50);border-radius:8px;padding:1rem">
+        <div style="font-size:1.8rem;font-weight:700;color:var(--navy)">${fmtPct(coreC)}</div>
+        <div style="font-size:.75rem;color:var(--g500)">Core Sheets</div>
+      </div>
+      <div style="text-align:center;background:var(--g50);border-radius:8px;padding:1rem">
+        <div style="font-size:1.8rem;font-weight:700;color:${totalC>=80?'var(--green)':totalC>=60?'var(--yellow)':'var(--red)'}">${fmtPct(totalC)}</div>
+        <div style="font-size:.75rem;color:var(--g500)">Overall Compliance</div>
+      </div>
+      <div style="text-align:center;background:var(--g50);border-radius:8px;padding:1rem">
+        <div style="font-size:1.8rem;font-weight:700;color:var(--navy)">${CA.completedScenarios.length}</div>
+        <div style="font-size:.75rem;color:var(--g500)">Scenarios Audited</div>
+      </div>
+    </div>
+    <h3 style="font-size:.92rem;font-weight:600;color:var(--navy);margin-bottom:.75rem">Core Sheets Compliance</h3>
+    <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden;margin-bottom:1.5rem">${formRows}</div>
+    ${CA.completedScenarios.length?`<h3 style="font-size:.92rem;font-weight:600;color:var(--navy);margin-bottom:.75rem">Scenario Compliance</h3>
+    <div style="border:1px solid var(--g200);border-radius:8px;overflow:hidden;margin-bottom:1.5rem">${scenRows}</div>`:''}
+    <div class="flex-row no-print" style="justify-content:space-between;margin-top:1rem">
+      <button class="btn btn-secondary" onclick="CA.step=${CA.hasSpecial?4:3};CA.currentScenarioId=null;renderAuditStep()">← Back</button>
+      <button class="btn btn-success btn-lg" onclick="saveAndFinish()">💾 Save & Finish</button>
+    </div>
+  </div>`;
+}
+
+function saveAndFinish(){
+  const forms = S.forms();
+  const scenarios = S.scenarios();
+  const formCompliance = {};
+  forms.forEach(f=>{ formCompliance[f.id]=calcCompliance(CA.coreResponses[f.id]||{}); });
+  const scenarioCompliance = {};
+  CA.completedScenarios.forEach(sid=>{ scenarioCompliance[sid]=calcCompliance(CA.scenarioResponses[sid]||{}); });
+  const audit = {
+    id: uid(),
+    date: CA.info.date,
+    fileNumber: CA.info.fileNumber,
+    unitId: CA.info.unitId,
+    unitDisplay: CA.info.unitDisplay,
+    reviewer: CA.info.reviewer,
+    coreResponses: CA.coreResponses,
+    scenarioResponses: CA.scenarioResponses,
+    completedScenarios: CA.completedScenarios,
+    formCompliance,
+    scenarioCompliance,
+    coreCompliance: calcCoreCompliance(CA),
+    totalCompliance: calcAuditCompliance(CA),
+    savedAt: new Date().toISOString()
+  };
+  S.saveAudit(audit);
+  toast('Audit saved successfully!','ok');
+  CA = null;
+  nav('history');
+}
+
+// =====================================================================
+// 9. HISTORY PAGE
+// =====================================================================
+let histFilters = { unit:'', dateFrom:'', dateTo:'', reviewer:'' };
+
+function renderHistory(){
+  const audits = S.audits();
+  const units = S.units();
+  const unitOpts = units.map(u=>`<option value="${esc(u.name)}" ${histFilters.unit===u.name?'selected':''}>${esc(u.name)}</option>`).join('');
+  const reviewers = [...new Set(audits.map(a=>a.reviewer))].sort();
+  const revOpts = reviewers.map(r=>`<option value="${esc(r)}" ${histFilters.reviewer===r?'selected':''}>${esc(r)}</option>`).join('');
+
+  let filtered = audits.filter(a=>{
+    if(histFilters.unit && a.unitDisplay!==histFilters.unit) return false;
+    if(histFilters.dateFrom && a.date < histFilters.dateFrom) return false;
+    if(histFilters.dateTo && a.date > histFilters.dateTo) return false;
+    if(histFilters.reviewer && a.reviewer!==histFilters.reviewer) return false;
+    return true;
+  }).reverse();
+
+  const rows = filtered.map(a=>{
+    const c=a.totalCompliance;
+    const scenList = a.completedScenarios||[];
+    return `<tr onclick="viewAudit('${esc(a.id)}')">
+      <td>${esc(fmtDate(a.date))}</td>
+      <td><strong>${esc(a.fileNumber)}</strong></td>
+      <td>${esc(a.unitDisplay)}</td>
+      <td>${esc(a.reviewer)}</td>
+      <td><span class="badge ${compClass(a.coreCompliance)}">${fmtPct(a.coreCompliance)}</span></td>
+      <td>${scenList.length?`<span class="badge b-blue">${scenList.length}</span>`:'-'}</td>
+      <td><span class="badge ${compClass(c)}">${fmtPct(c)}</span></td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn btn-danger btn-sm" onclick="deleteAudit('${esc(a.id)}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('historyContent').innerHTML = `
+    <div class="flex-row" style="justify-content:space-between;margin-bottom:1.25rem">
+      <div class="section-title" style="margin:0">Audit History <span style="font-size:.85rem;color:var(--g500);font-weight:400">(${filtered.length} of ${audits.length})</span></div>
+      <button class="btn btn-outline btn-sm no-print" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+    <div class="card no-print">
+      <div class="filter-row">
+        <div class="form-group"><label class="form-label">Unit</label>
+          <select onchange="histFilters.unit=this.value;renderHistory()"><option value="">All Units</option>${unitOpts}</select></div>
+        <div class="form-group"><label class="form-label">Date From</label>
+          <input type="date" value="${esc(histFilters.dateFrom)}" onchange="histFilters.dateFrom=this.value;renderHistory()"></div>
+        <div class="form-group"><label class="form-label">Date To</label>
+          <input type="date" value="${esc(histFilters.dateTo)}" onchange="histFilters.dateTo=this.value;renderHistory()"></div>
+        <div class="form-group"><label class="form-label">Reviewer</label>
+          <select onchange="histFilters.reviewer=this.value;renderHistory()"><option value="">All Reviewers</option>${revOpts}</select></div>
+        <div style="padding-bottom:.05rem">
+          <button class="btn btn-secondary btn-sm" onclick="histFilters={unit:'',dateFrom:'',dateTo:'',reviewer:''};renderHistory()">Clear</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      ${filtered.length ? `<div style="overflow-x:auto"><table class="tbl">
+        <thead><tr><th>Date</th><th>File No.</th><th>Unit</th><th>Reviewer</th><th>Core %</th><th>Scenarios</th><th>Total %</th><th class="no-print"></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : `<div class="empty"><div class="ei">🔍</div><p>No audits match the current filters.</p></div>`}
+    </div>`;
+}
+
+function deleteAudit(id){
+  confirmDialog('Are you sure you want to delete this audit? This cannot be undone.', function(){
+    S.deleteAudit(id);
+    toast('Audit deleted','ok');
+    renderHistory();
+  }, 'Delete Audit');
+}
+
+function viewAudit(id){
+  const audit = S.audits().find(a=>a.id===id);
+  if(!audit) return;
+  const forms = S.forms();
+  const scenarios = S.scenarios();
+
+  const formRows = forms.map(f=>{
+    const c = audit.formCompliance?audit.formCompliance[f.id]:calcCompliance(audit.coreResponses[f.id]||{});
+    const r = audit.coreResponses[f.id]||{};
+    const answered = Object.values(r).filter(x=>x).length;
+    return `<tr><td>${esc(f.name)}</td><td>${answered}/${f.items.length}</td><td><span class="badge ${compClass(c)}">${fmtPct(c)}</span></td></tr>`;
+  }).join('');
+
+  const scenRows = (audit.completedScenarios||[]).map(sid=>{
+    const sc=scenarios.find(s=>s.id===sid);
+    if(!sc) return '';
+    const c=audit.scenarioCompliance?audit.scenarioCompliance[sid]:calcCompliance(audit.scenarioResponses[sid]||{});
+    return `<tr><td>${esc(sc.name)}</td><td><span class="badge ${compClass(c)}">${fmtPct(c)}</span></td></tr>`;
+  }).join('');
+
+  showModal(`<div class="modal-title">Audit Details — File #${esc(audit.fileNumber)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem;font-size:.85rem">
+      <div><span style="color:var(--g500)">Date: </span><strong>${esc(fmtDate(audit.date))}</strong></div>
+      <div><span style="color:var(--g500)">Unit: </span><strong>${esc(audit.unitDisplay)}</strong></div>
+      <div><span style="color:var(--g500)">Reviewer: </span><strong>${esc(audit.reviewer)}</strong></div>
+      <div><span style="color:var(--g500)">Overall: </span><span class="badge ${compClass(audit.totalCompliance)}">${fmtPct(audit.totalCompliance)}</span></div>
+    </div>
+    <table class="audit-detail-table"><thead><tr><th>Form</th><th>Answered</th><th>Compliance</th></tr></thead><tbody>${formRows}</tbody></table>
+    ${scenRows?`<h4 style="margin:1rem 0 .5rem;font-size:.88rem;color:var(--navy)">Scenarios</h4>
+    <table class="audit-detail-table"><thead><tr><th>Scenario</th><th>Compliance</th></tr></thead><tbody>${scenRows}</tbody></table>`:''}
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="hideModal()">Close</button></div>`);
+}
+
+function exportCSV(){
+  const audits = S.audits();
+  if(!audits.length){ toast('No audits to export','err'); return; }
+  const headers = ['Date','File Number','Unit','Reviewer','Core Compliance %','Scenarios Count','Total Compliance %'];
+  const rows = audits.map(a=>[
+    a.date, a.fileNumber, a.unitDisplay, a.reviewer,
+    a.coreCompliance!=null?a.coreCompliance.toFixed(1):'N/A',
+    (a.completedScenarios||[]).length,
+    a.totalCompliance!=null?a.totalCompliance.toFixed(1):'N/A'
+  ]);
+  let csv = headers.join(',')+'\n'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='nursing_audits_'+today()+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV exported','ok');
+}
+
+// =====================================================================
+// 10. REPORTS PAGE
+// =====================================================================
+let repFilters = { unit:'', dateFrom:'', dateTo:'' };
+
+function renderReports(){
+  const audits = S.audits();
+  const units = S.units();
+  const unitOpts = units.map(u=>`<option value="${esc(u.name)}" ${repFilters.unit===u.name?'selected':''}>${esc(u.name)}</option>`).join('');
+
+  document.getElementById('reportsContent').innerHTML = `
+    <div class="flex-row" style="justify-content:space-between;margin-bottom:1.25rem">
+      <div class="section-title" style="margin:0">Reports & Analytics</div>
+    </div>
+    <div class="card no-print">
+      <div class="filter-row">
+        <div class="form-group"><label class="form-label">Unit</label>
+          <select onchange="repFilters.unit=this.value;drawReports()"><option value="">All Units</option>${unitOpts}</select></div>
+        <div class="form-group"><label class="form-label">Date From</label>
+          <input type="date" value="${esc(repFilters.dateFrom)}" onchange="repFilters.dateFrom=this.value;drawReports()"></div>
+        <div class="form-group"><label class="form-label">Date To</label>
+          <input type="date" value="${esc(repFilters.dateTo)}" onchange="repFilters.dateTo=this.value;drawReports()"></div>
+        <div style="padding-bottom:.05rem">
+          <button class="btn btn-secondary btn-sm" onclick="repFilters={unit:'',dateFrom:'',dateTo:''};renderReports()">Clear</button>
+        </div>
+      </div>
+    </div>
+    <div id="repStats" class="stat-grid"></div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>Compliance by Unit</h3><div class="chart-wrap"><canvas id="chartUnit"></canvas></div></div>
+      <div class="chart-box"><h3>Compliance by Core Form</h3><div class="chart-wrap"><canvas id="chartForm"></canvas></div></div>
+      <div class="chart-box"><h3>Compliance by Scenario</h3><div class="chart-wrap"><canvas id="chartScen"></canvas></div></div>
+      <div class="chart-box"><h3>Compliance Trend Over Time</h3><div class="chart-wrap"><canvas id="chartTrend"></canvas></div></div>
+    </div>`;
+  drawReports();
+}
+
+function drawReports(){
+  let audits = S.audits().filter(a=>{
+    if(repFilters.unit && a.unitDisplay!==repFilters.unit) return false;
+    if(repFilters.dateFrom && a.date < repFilters.dateFrom) return false;
+    if(repFilters.dateTo && a.date > repFilters.dateTo) return false;
+    return true;
+  });
+
+  // Stats
+  const total=audits.length;
+  const comps=audits.map(a=>a.totalCompliance).filter(x=>x!=null);
+  const avg=comps.length?comps.reduce((a,b)=>a+b,0)/comps.length:null;
+  const hi=comps.filter(c=>c>=80).length;
+  const lo=comps.filter(c=>c<60).length;
+  document.getElementById('repStats').innerHTML=`
+    <div class="stat-card"><div class="stat-num">${total}</div><div class="stat-lbl">Audits in Range</div></div>
+    <div class="stat-card green"><div class="stat-num">${fmtPct(avg)}</div><div class="stat-lbl">Average Compliance</div></div>
+    <div class="stat-card green"><div class="stat-num">${hi}</div><div class="stat-lbl">High Compliance (≥80%)</div></div>
+    <div class="stat-card red"><div class="stat-num">${lo}</div><div class="stat-lbl">Low Compliance (&lt;60%)</div></div>`;
+
+  destroyChart('chartUnit'); destroyChart('chartForm'); destroyChart('chartScen'); destroyChart('chartTrend');
+
+  // By unit
+  const unitMap={};
+  audits.forEach(a=>{
+    if(!unitMap[a.unitDisplay]) unitMap[a.unitDisplay]=[];
+    if(a.totalCompliance!=null) unitMap[a.unitDisplay].push(a.totalCompliance);
+  });
+  const unitLabels=Object.keys(unitMap);
+  const unitData=unitLabels.map(u=>{ const arr=unitMap[u]; return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0; });
+  createBarChart('chartUnit', unitLabels, unitData, 'Avg Compliance %');
+
+  // By form
+  const forms=S.forms();
+  const formMap={};
+  forms.forEach(f=>{ formMap[f.id]=[]; });
+  audits.forEach(a=>{
+    forms.forEach(f=>{
+      const c=a.formCompliance?a.formCompliance[f.id]:calcCompliance(a.coreResponses[f.id]||{});
+      if(c!=null && formMap[f.id]) formMap[f.id].push(c);
+    });
+  });
+  const formLabels=forms.map(f=>f.name.length>28?f.name.slice(0,25)+'...':f.name);
+  const formData=forms.map(f=>{ const arr=formMap[f.id]||[]; return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0; });
+  createBarChart('chartForm', formLabels, formData, 'Avg Compliance %');
+
+  // By scenario
+  const scenarios=S.scenarios();
+  const scenMap={};
+  scenarios.forEach(s=>{ scenMap[s.id]=[]; });
+  audits.forEach(a=>{
+    (a.completedScenarios||[]).forEach(sid=>{
+      const c=a.scenarioCompliance?a.scenarioCompliance[sid]:calcCompliance(a.scenarioResponses[sid]||{});
+      if(c!=null && scenMap[sid]) scenMap[sid].push(c);
+    });
+  });
+  const scenLabels=scenarios.map(s=>s.name.length>28?s.name.slice(0,25)+'...':s.name);
+  const scenData=scenarios.map(s=>{ const arr=scenMap[s.id]||[]; return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null; });
+  createBarChart('chartScen', scenLabels, scenData.map(d=>d||0), 'Avg Compliance %', scenData.map(d=>d==null?'rgba(200,200,200,.5)':null));
+
+  // Trend
+  const sorted=[...audits].sort((a,b)=>a.date.localeCompare(b.date));
+  const trendLabels=sorted.map(a=>a.date);
+  const trendData=sorted.map(a=>a.totalCompliance);
+  createLineChart('chartTrend', trendLabels, trendData);
+}
+
+function destroyChart(id){
+  if(chartInstances[id]){ chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function createBarChart(id, labels, data, label, bgOverrides){
+  const ctx=document.getElementById(id);
+  if(!ctx) return;
+  const bgs=data.map((d,i)=> bgOverrides&&bgOverrides[i]?bgOverrides[i]: d>=80?'rgba(22,163,74,.75)': d>=60?'rgba(217,119,6,.75)':'rgba(220,38,38,.75)');
+  chartInstances[id]=new Chart(ctx,{
+    type:'bar',
+    data:{ labels, datasets:[{ label, data, backgroundColor:bgs, borderRadius:4 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+      scales:{ y:{ min:0,max:100, ticks:{callback:v=>v+'%'} }, x:{ ticks:{ maxRotation:45,font:{size:10} } } } }
+  });
+}
+
+function createLineChart(id, labels, data){
+  const ctx=document.getElementById(id);
+  if(!ctx) return;
+  chartInstances[id]=new Chart(ctx,{
+    type:'line',
+    data:{ labels, datasets:[{ label:'Compliance %', data, borderColor:'#0a2342', backgroundColor:'rgba(10,35,66,.08)', fill:true, tension:.3, pointRadius:4, pointBackgroundColor:'#0a2342' }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+      scales:{ y:{ min:0,max:100, ticks:{callback:v=>v+'%'} }, x:{ ticks:{ maxRotation:45,font:{size:10} } } } }
+  });
+}
+
+// =====================================================================
+// 11. ADMIN LOGIN
+// =====================================================================
+function openAdminLogin(){
+  if(isAdmin){ nav('admin'); return; }
+  showModal(`<div class="modal-title">🔐 Admin Login</div>
+    <div class="form-group"><label class="form-label">Password</label>
+      <input type="password" id="adminPwInput" placeholder="Enter admin password" onkeydown="if(event.key==='Enter')doAdminLogin()"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="doAdminLogin()">Login</button>
+    </div>`);
+  setTimeout(()=>{ const el=document.getElementById('adminPwInput'); if(el) el.focus(); },100);
+}
+
+function doAdminLogin(){
+  const pw=document.getElementById('adminPwInput').value;
+  if(pw===S.settings().adminPassword){ isAdmin=true; hideModal(); nav('admin'); toast('Admin access granted','ok'); }
+  else { toast('Incorrect password','err'); }
+}
+
+function adminLogout(){ isAdmin=false; nav('home'); toast('Logged out','info'); }
+
+// =====================================================================
+// 12. ADMIN PANEL
+// =====================================================================
+function renderAdmin(){
+  if(!isAdmin){ openAdminLogin(); return; }
+  const tabs=['forms','scenarios','users','units','settings'];
+  const tabLabels={ forms:'Forms', scenarios:'Scenarios', users:'Users', units:'Units', settings:'Settings' };
+  const tabHtml=tabs.map(t=>`<button class="atab${adminSection===t?' active':''}" onclick="adminSection='${t}';renderAdmin()">${tabLabels[t]}</button>`).join('');
+  let body='';
+  if(adminSection==='forms') body=renderAdminForms();
+  else if(adminSection==='scenarios') body=renderAdminScenarios();
+  else if(adminSection==='users') body=renderAdminUsers();
+  else if(adminSection==='units') body=renderAdminUnits();
+  else if(adminSection==='settings') body=renderAdminSettings();
+
+  document.getElementById('adminContent').innerHTML=`
+    <div class="flex-row" style="justify-content:space-between;margin-bottom:1.25rem">
+      <div class="section-title" style="margin:0">⚙ Super Admin Panel</div>
+      <button class="btn btn-outline btn-sm" onclick="adminLogout()">Logout</button>
+    </div>
+    <div class="admin-tabs">${tabHtml}</div>
+    ${body}`;
+}
+
+// FORMS MANAGEMENT
+function renderAdminForms(){
+  const forms=S.forms();
+  const html=forms.map((f,fi)=>{
+    const items=f.items.map((item,ii)=>`
+      <div class="item-row">
+        <span class="item-text">${esc(item.text)}${item.mandatory?` <span class="badge b-blue" style="font-size:.68rem">Required</span>`:''}</span>
+        <div class="item-acts">
+          <button class="btn btn-outline btn-sm" onclick="editItem('forms','${esc(f.id)}','${esc(item.id)}')">Edit</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleMandatory('forms','${esc(f.id)}','${esc(item.id)}')">${item.mandatory?'Unrequire':'Require'}</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteItem('forms','${esc(f.id)}','${esc(item.id)}')">✕</button>
+        </div>
+      </div>`).join('');
+    return `<div class="card">
+      <div class="card-hdr">
+        <span class="card-title">${fi+1}. ${esc(f.name)}</span>
+        <div class="flex-row" style="gap:.4rem">
+          ${fi>0?`<button class="btn btn-outline btn-sm" onclick="moveForm('${esc(f.id)}',-1)">↑</button>`:''}
+          ${fi<forms.length-1?`<button class="btn btn-outline btn-sm" onclick="moveForm('${esc(f.id)}',1)">↓</button>`:''}
+          <button class="btn btn-outline btn-sm" onclick="editFormName('${esc(f.id)}')">Rename</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteForm('${esc(f.id)}')">Delete</button>
+        </div>
+      </div>
+      ${items}
+      <button class="btn btn-outline btn-sm" style="margin-top:.75rem" onclick="addItem('forms','${esc(f.id)}')">+ Add Item</button>
+    </div>`;
+  }).join('');
+  return html+`<button class="btn btn-primary" onclick="addForm()">+ Add New Form</button>`;
+}
+
+function addForm(){
+  showModal(`<div class="modal-title">Add New Form</div>
+    <div class="form-group"><label class="form-label">Form Name</label><input type="text" id="newFormName" placeholder="Enter form name"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddForm()">Add Form</button>
+    </div>`);
+}
+function confirmAddForm(){
+  const name=document.getElementById('newFormName').value.trim();
+  if(!name){ toast('Enter a form name','err'); return; }
+  const forms=S.forms();
+  forms.push({ id:'f'+uid(), name, items:[] });
+  S.set('nda_forms',forms); hideModal(); toast('Form added','ok'); renderAdmin();
+}
+
+function editFormName(fid){
+  const forms=S.forms(); const f=forms.find(x=>x.id===fid); if(!f) return;
+  showModal(`<div class="modal-title">Rename Form</div>
+    <div class="form-group"><label class="form-label">Form Name</label><input type="text" id="editFN" value="${esc(f.name)}"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditFormName('${esc(fid)}')">Save</button>
+    </div>`);
+}
+function confirmEditFormName(fid){
+  const name=document.getElementById('editFN').value.trim();
+  if(!name){ toast('Enter a name','err'); return; }
+  const forms=S.forms(); const f=forms.find(x=>x.id===fid); if(f) f.name=name;
+  S.set('nda_forms',forms); hideModal(); toast('Renamed','ok'); renderAdmin();
+}
+
+function deleteForm(fid){
+  confirmDialog('Delete this form? All audit data for this form will no longer be viewable.', function(){
+    S.set('nda_forms',S.forms().filter(f=>f.id!==fid));
+    toast('Form deleted','ok'); renderAdmin();
+  },'Delete Form');
+}
+
+function moveForm(fid,dir){
+  const forms=S.forms(); const i=forms.findIndex(f=>f.id===fid);
+  if(i+dir<0||i+dir>=forms.length) return;
+  [forms[i],forms[i+dir]]=[forms[i+dir],forms[i]];
+  S.set('nda_forms',forms); renderAdmin();
+}
+
+function addItem(type, parentId){
+  showModal(`<div class="modal-title">Add Item</div>
+    <div class="form-group"><label class="form-label">Item Text</label><textarea id="newItemText" rows="3" placeholder="Enter item text"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddItem('${esc(type)}','${esc(parentId)}')">Add</button>
+    </div>`);
+}
+function confirmAddItem(type,pid){
+  const text=document.getElementById('newItemText').value.trim();
+  if(!text){ toast('Enter item text','err'); return; }
+  const key=type==='forms'?'nda_forms':'nda_scenarios';
+  const arr=type==='forms'?S.forms():S.scenarios();
+  const parent=arr.find(x=>x.id===pid);
+  if(parent) parent.items.push({ id:(type==='forms'?'fi':'si')+uid(), text, mandatory:false });
+  S.set(key,arr); hideModal(); toast('Item added','ok'); renderAdmin();
+}
+
+function editItem(type,pid,iid){
+  const arr=type==='forms'?S.forms():S.scenarios();
+  const parent=arr.find(x=>x.id===pid); if(!parent) return;
+  const item=parent.items.find(x=>x.id===iid); if(!item) return;
+  showModal(`<div class="modal-title">Edit Item</div>
+    <div class="form-group"><label class="form-label">Item Text</label><textarea id="editItemText" rows="3">${esc(item.text)}</textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditItem('${esc(type)}','${esc(pid)}','${esc(iid)}')">Save</button>
+    </div>`);
+}
+function confirmEditItem(type,pid,iid){
+  const text=document.getElementById('editItemText').value.trim();
+  if(!text){ toast('Enter text','err'); return; }
+  const key=type==='forms'?'nda_forms':'nda_scenarios';
+  const arr=type==='forms'?S.forms():S.scenarios();
+  const parent=arr.find(x=>x.id===pid);
+  const item=parent&&parent.items.find(x=>x.id===iid);
+  if(item) item.text=text;
+  S.set(key,arr); hideModal(); toast('Updated','ok'); renderAdmin();
+}
+
+function toggleMandatory(type,pid,iid){
+  const key=type==='forms'?'nda_forms':'nda_scenarios';
+  const arr=type==='forms'?S.forms():S.scenarios();
+  const parent=arr.find(x=>x.id===pid);
+  const item=parent&&parent.items.find(x=>x.id===iid);
+  if(item) item.mandatory=!item.mandatory;
+  S.set(key,arr); renderAdmin();
+}
+
+function deleteItem(type,pid,iid){
+  confirmDialog('Delete this item?', function(){
+    const key=type==='forms'?'nda_forms':'nda_scenarios';
+    const arr=type==='forms'?S.forms():S.scenarios();
+    const parent=arr.find(x=>x.id===pid);
+    if(parent) parent.items=parent.items.filter(x=>x.id!==iid);
+    S.set(key,arr); toast('Item deleted','ok'); renderAdmin();
+  },'Delete Item');
+}
+
+// SCENARIOS MANAGEMENT
+function renderAdminScenarios(){
+  const scenarios=S.scenarios();
+  const html=scenarios.map((s,si)=>{
+    const items=s.items.map(item=>`
+      <div class="item-row">
+        <span class="item-text">${esc(item.text)}${item.mandatory?` <span class="badge b-blue" style="font-size:.68rem">Required</span>`:''}</span>
+        <div class="item-acts">
+          <button class="btn btn-outline btn-sm" onclick="editItem('scenarios','${esc(s.id)}','${esc(item.id)}')">Edit</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleMandatory('scenarios','${esc(s.id)}','${esc(item.id)}')">${item.mandatory?'Unrequire':'Require'}</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteItem('scenarios','${esc(s.id)}','${esc(item.id)}')">✕</button>
+        </div>
+      </div>`).join('');
+    return `<div class="card">
+      <div class="card-hdr">
+        <span class="card-title">${si+1}. ${esc(s.name)}</span>
+        <div class="flex-row" style="gap:.4rem">
+          ${si>0?`<button class="btn btn-outline btn-sm" onclick="moveScenario('${esc(s.id)}',-1)">↑</button>`:''}
+          ${si<scenarios.length-1?`<button class="btn btn-outline btn-sm" onclick="moveScenario('${esc(s.id)}',1)">↓</button>`:''}
+          <button class="btn btn-outline btn-sm" onclick="editScenarioName('${esc(s.id)}')">Rename</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteScenario('${esc(s.id)}')">Delete</button>
+        </div>
+      </div>
+      ${items}
+      <button class="btn btn-outline btn-sm" style="margin-top:.75rem" onclick="addItem('scenarios','${esc(s.id)}')">+ Add Item</button>
+    </div>`;
+  }).join('');
+  return html+`<button class="btn btn-primary" onclick="addScenario()">+ Add New Scenario</button>`;
+}
+
+function addScenario(){
+  showModal(`<div class="modal-title">Add New Scenario</div>
+    <div class="form-group"><label class="form-label">Scenario Name</label><input type="text" id="newScenName" placeholder="Enter scenario name"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddScenario()">Add</button>
+    </div>`);
+}
+function confirmAddScenario(){
+  const name=document.getElementById('newScenName').value.trim();
+  if(!name){ toast('Enter a name','err'); return; }
+  const s=S.scenarios();
+  s.push({ id:'s'+uid(), name, items:[] });
+  S.set('nda_scenarios',s); hideModal(); toast('Scenario added','ok'); renderAdmin();
+}
+function editScenarioName(sid){
+  const s=S.scenarios().find(x=>x.id===sid); if(!s) return;
+  showModal(`<div class="modal-title">Rename Scenario</div>
+    <div class="form-group"><label class="form-label">Name</label><input type="text" id="editSN" value="${esc(s.name)}"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditScenarioName('${esc(sid)}')">Save</button>
+    </div>`);
+}
+function confirmEditScenarioName(sid){
+  const name=document.getElementById('editSN').value.trim(); if(!name){ toast('Enter a name','err'); return; }
+  const scenarios=S.scenarios(); const s=scenarios.find(x=>x.id===sid); if(s) s.name=name;
+  S.set('nda_scenarios',scenarios); hideModal(); toast('Renamed','ok'); renderAdmin();
+}
+function deleteScenario(sid){
+  confirmDialog('Delete this scenario?', function(){
+    S.set('nda_scenarios',S.scenarios().filter(s=>s.id!==sid));
+    toast('Scenario deleted','ok'); renderAdmin();
+  },'Delete Scenario');
+}
+function moveScenario(sid,dir){
+  const s=S.scenarios(); const i=s.findIndex(x=>x.id===sid);
+  if(i+dir<0||i+dir>=s.length) return;
+  [s[i],s[i+dir]]=[s[i+dir],s[i]];
+  S.set('nda_scenarios',s); renderAdmin();
+}
+
+// USERS MANAGEMENT
+function renderAdminUsers(){
+  const users=S.users(); const settings=S.settings();
+  const rows=users.map((u,i)=>`
+    <div class="item-row">
+      <span class="item-text">${esc(u)}${u===settings.defaultReviewer?` <span class="badge b-blue" style="font-size:.68rem">Default</span>`:''}</span>
+      <div class="item-acts">
+        <button class="btn btn-outline btn-sm" onclick="editUser(${i})">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="setDefaultUser(${i})">Set Default</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser(${i})">✕</button>
+      </div>
+    </div>`).join('');
+  return `<div class="card">
+    <div class="card-hdr"><span class="card-title">Reviewer Names</span>
+      <button class="btn btn-primary btn-sm" onclick="addUser()">+ Add Reviewer</button>
+    </div>
+    ${rows||'<div class="empty"><p>No reviewers configured.</p></div>'}
+  </div>`;
+}
+function addUser(){
+  showModal(`<div class="modal-title">Add Reviewer</div>
+    <div class="form-group"><label class="form-label">Name</label><input type="text" id="newUserName" placeholder="Enter reviewer name"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddUser()">Add</button>
+    </div>`);
+}
+function confirmAddUser(){
+  const name=document.getElementById('newUserName').value.trim(); if(!name){ toast('Enter a name','err'); return; }
+  const users=S.users(); users.push(name); S.set('nda_users',users); hideModal(); toast('Reviewer added','ok'); renderAdmin();
+}
+function editUser(i){
+  const users=S.users();
+  showModal(`<div class="modal-title">Edit Reviewer</div>
+    <div class="form-group"><label class="form-label">Name</label><input type="text" id="editUserName" value="${esc(users[i])}"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditUser(${i})">Save</button>
+    </div>`);
+}
+function confirmEditUser(i){
+  const name=document.getElementById('editUserName').value.trim(); if(!name){ toast('Enter a name','err'); return; }
+  const users=S.users(); users[i]=name; S.set('nda_users',users); hideModal(); toast('Updated','ok'); renderAdmin();
+}
+function setDefaultUser(i){
+  const users=S.users(); const settings=S.settings(); settings.defaultReviewer=users[i]; S.set('nda_settings',settings);
+  toast('Default reviewer set','ok'); renderAdmin();
+}
+function deleteUser(i){
+  confirmDialog('Delete this reviewer?', function(){
+    const users=S.users(); users.splice(i,1); S.set('nda_users',users); toast('Deleted','ok'); renderAdmin();
+  },'Delete Reviewer');
+}
+
+// UNITS MANAGEMENT
+function renderAdminUnits(){
+  const units=S.units();
+  const rows=units.map((u,i)=>`
+    <div class="item-row">
+      <span class="item-text">${esc(u.name)}${u.isOther?` <span class="badge" style="background:var(--yellow-l);color:var(--yellow);font-size:.68rem">Other (free text)</span>`:''}</span>
+      <div class="item-acts">
+        <button class="btn btn-outline btn-sm" onclick="editUnit('${esc(u.id)}')">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleUnitOther('${esc(u.id)}')">${u.isOther?'Unmark Other':'Mark as Other'}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUnit('${esc(u.id)}')">✕</button>
+      </div>
+    </div>`).join('');
+  return `<div class="card">
+    <div class="card-hdr"><span class="card-title">Units</span>
+      <button class="btn btn-primary btn-sm" onclick="addUnit()">+ Add Unit</button>
+    </div>
+    ${rows}
+  </div>`;
+}
+function addUnit(){
+  showModal(`<div class="modal-title">Add Unit</div>
+    <div class="form-group"><label class="form-label">Unit Name</label><input type="text" id="newUnitName" placeholder="e.g. L4Z2"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddUnit()">Add</button>
+    </div>`);
+}
+function confirmAddUnit(){
+  const name=document.getElementById('newUnitName').value.trim(); if(!name){ toast('Enter unit name','err'); return; }
+  const units=S.units(); units.push({ id:'u'+uid(), name, isOther:false }); S.set('nda_units',units);
+  hideModal(); toast('Unit added','ok'); renderAdmin();
+}
+function editUnit(uid_){
+  const units=S.units(); const u=units.find(x=>x.id===uid_); if(!u) return;
+  showModal(`<div class="modal-title">Edit Unit</div>
+    <div class="form-group"><label class="form-label">Unit Name</label><input type="text" id="editUnitName" value="${esc(u.name)}"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmEditUnit('${esc(uid_)}')">Save</button>
+    </div>`);
+}
+function confirmEditUnit(uid_){
+  const name=document.getElementById('editUnitName').value.trim(); if(!name){ toast('Enter a name','err'); return; }
+  const units=S.units(); const u=units.find(x=>x.id===uid_); if(u) u.name=name;
+  S.set('nda_units',units); hideModal(); toast('Updated','ok'); renderAdmin();
+}
+function toggleUnitOther(uid_){
+  const units=S.units(); const u=units.find(x=>x.id===uid_); if(u) u.isOther=!u.isOther;
+  S.set('nda_units',units); renderAdmin();
+}
+function deleteUnit(uid_){
+  confirmDialog('Delete this unit?', function(){
+    S.set('nda_units',S.units().filter(u=>u.id!==uid_)); toast('Deleted','ok'); renderAdmin();
+  },'Delete Unit');
+}
+
+// SETTINGS
+function renderAdminSettings(){
+  return `<div class="card">
+    <div class="card-hdr"><span class="card-title">Change Admin Password</span></div>
+    <div style="max-width:400px">
+      <div class="form-group"><label class="form-label">New Password</label><input type="password" id="newPw1" placeholder="New password"></div>
+      <div class="form-group"><label class="form-label">Confirm Password</label><input type="password" id="newPw2" placeholder="Confirm new password"></div>
+      <button class="btn btn-primary" onclick="changePassword()">Update Password</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-hdr"><span class="card-title">Data Management</span></div>
+    <div class="flex-row" style="flex-wrap:wrap;gap:1rem">
+      <button class="btn btn-outline" onclick="exportJSON()">⬇ Export All Data (JSON)</button>
+      <button class="btn btn-outline" onclick="document.getElementById('importFile').click()">⬆ Import Data (JSON)</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(this)">
+      <button class="btn btn-danger" onclick="resetAllData()">⚠ Reset All Data</button>
+    </div>
+    <p style="margin-top:1rem;font-size:.82rem;color:var(--g500)">Export creates a JSON backup of all forms, scenarios, units, users, settings and audits. Import will overwrite all current data.</p>
+  </div>`;
+}
+
+function changePassword(){
+  const p1=document.getElementById('newPw1').value;
+  const p2=document.getElementById('newPw2').value;
+  if(!p1){ toast('Enter a new password','err'); return; }
+  if(p1!==p2){ toast('Passwords do not match','err'); return; }
+  const settings=S.settings(); settings.adminPassword=p1; S.set('nda_settings',settings);
+  toast('Password updated','ok');
+  document.getElementById('newPw1').value=''; document.getElementById('newPw2').value='';
+}
+
+function exportJSON(){
+  const data={
+    forms:S.forms(), scenarios:S.scenarios(), units:S.units(),
+    users:S.users(), settings:S.settings(), audits:S.audits(),
+    exportedAt:new Date().toISOString()
+  };
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='nda_backup_'+today()+'.json'; a.click();
+  URL.revokeObjectURL(url); toast('Data exported','ok');
+}
+
+function importJSON(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const data=JSON.parse(e.target.result);
+      confirmDialog('This will overwrite ALL current data. Are you absolutely sure?', function(){
+        if(data.forms) S.set('nda_forms',data.forms);
+        if(data.scenarios) S.set('nda_scenarios',data.scenarios);
+        if(data.units) S.set('nda_units',data.units);
+        if(data.users) S.set('nda_users',data.users);
+        if(data.settings) S.set('nda_settings',data.settings);
+        if(data.audits) S.set('nda_audits',data.audits);
+        toast('Data imported successfully','ok'); renderAdmin();
+      },'Import Data — This Cannot Be Undone');
+    }catch(err){ toast('Invalid JSON file','err'); }
+  };
+  reader.readAsText(file);
+  input.value='';
+}
+
+function resetAllData(){
+  showModal(`<div class="modal-title" style="color:var(--red)">⚠ Reset All Data</div>
+    <p style="font-size:.9rem;color:var(--g600);margin-bottom:1rem">This will permanently delete ALL audits, forms, scenarios, and settings. This action CANNOT be undone.</p>
+    <p style="font-size:.9rem;font-weight:600;margin-bottom:1.5rem">Type <strong>RESET</strong> to confirm:</p>
+    <div class="form-group"><input type="text" id="resetConfirm" placeholder="Type RESET here"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="hideModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmResetData()">Delete Everything</button>
+    </div>`);
+}
+
+function confirmResetData(){
+  const val=document.getElementById('resetConfirm').value;
+  if(val!=='RESET'){ toast('Type RESET to confirm','err'); return; }
+  ['nda_forms','nda_scenarios','nda_units','nda_audits','nda_settings','nda_users'].forEach(k=>localStorage.removeItem(k));
+  initData(); hideModal(); isAdmin=false; toast('All data has been reset','info'); nav('home');
+}
+
+// =====================================================================
+// 13. STARTUP
+// =====================================================================
+initData();
+renderHome();
+</script>
+</body>
+</html>
