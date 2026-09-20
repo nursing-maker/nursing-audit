@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17365d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="JCI Tracer">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./style.css">
+<title>JCI Nursing Tracer</title>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div>
+      <h1>JCI Nursing Tracer</h1>
+      <div class="subtitle">Local Tablet Pilot v0.3</div>
+    </div>
+    <button class="topBtn" id="dataBtn">Data & Backup</button>
+  </header>
+
+  <main>
+    <section id="setupScreen" class="screen active">
+      <div class="card">
+        <h2>Local Master Database</h2>
+        <p class="muted">The app shell is installed from the web. Your JCI question database is imported from a local JSON file and saved on this iPad.</p>
+        <div id="dbStatus" class="statusCard"></div>
+        <div class="actions">
+          <button class="primary" id="importDbBtn">Import Master Database</button>
+          <button class="secondary hidden" id="continueBtn">Continue</button>
+        </div>
+        <input type="file" id="dbFile" accept=".json,application/json" hidden>
+      </div>
+    </section>
+
+    <section id="unitScreen" class="screen">
+      <div class="card">
+        <h2>Choose Unit</h2>
+        <p class="muted">Start with the area you are rounding today.</p>
+        <div id="unitGrid" class="grid two"></div>
+      </div>
+    </section>
+
+    <section id="staffScreen" class="screen">
+      <div class="card">
+        <h2 id="staffHeading">Staff & Role</h2>
+        <label>Staff ID</label>
+        <input id="staffId" type="text" inputmode="text" autocomplete="off" placeholder="Enter Staff ID">
+        <div class="sectionLabel">Role</div>
+        <div class="grid three">
+          <button class="choice role" data-role="SN">Staff Nurse<small>SN</small></button>
+          <button class="choice role" data-role="CN">Charge Nurse<small>SN + CN</small></button>
+          <button class="choice role" data-role="HN">Head Nurse<small>SN + CN + HN</small></button>
+        </div>
+        <div id="staffStats" class="stats hidden"></div>
+        <div class="nav"><button class="secondary" data-back="unitScreen">Back</button><button id="staffContinue" class="primary grow">Continue</button></div>
+      </div>
+    </section>
+
+    <section id="modeScreen" class="screen">
+      <div class="card">
+        <h2>Choose Selection Mode</h2>
+        <div id="roundContext" class="context"></div>
+        <div class="grid two">
+          <button class="mode" data-mode="general"><span>★</span><b>General Core</b><small>E1 / E2 / E3 candidates. Approve or reject them during use.</small></button>
+          <button class="mode" data-mode="patient"><span>⌁</span><b>Patient-Driven</b><small>Central line, pain, blood, post-op, restraint and more.</small></button>
+          <button class="mode" data-mode="chapter"><span>▦</span><b>By Chapter</b><small>Choose one or more JCI chapters.</small></button>
+          <button class="mode" data-mode="review"><span>✓</span><b>Review Unreviewed</b><small>Continue practical review for this unit.</small></button>
+        </div>
+      </div>
+    </section>
+
+    <section id="builderScreen" class="screen">
+      <div class="card">
+        <h2 id="builderTitle">Build Session</h2>
+        <p id="builderHelp" class="muted"></p>
+
+        <div id="generalBuilder" class="hidden">
+          <div class="sectionLabel">Suggested Tier</div>
+          <div class="grid three">
+            <button class="chip tier selected" data-tier="E1">E1 Essential</button>
+            <button class="chip tier" data-tier="E2">E2 Rotation</button>
+            <button class="chip tier" data-tier="E3">E3 Role-Specific</button>
+          </div>
+          <label class="selectLabel">General Core Decision</label>
+          <select id="gcDecisionFilter">
+            <option value="all">All candidates</option>
+            <option value="pending">Pending only</option>
+            <option value="approved">Approved only</option>
+          </select>
+        </div>
+
+        <div id="patientBuilder" class="hidden">
+          <div class="sectionLabel">Patient / Situation</div>
+          <div id="tagGrid" class="grid two"></div>
+          <div class="micro">Prototype tags are an operational layer. Your feedback will be used to refine them.</div>
+        </div>
+
+        <div id="chapterBuilder" class="hidden">
+          <div class="sectionLabel">Chapter</div>
+          <div id="chapterGrid" class="grid four"></div>
+        </div>
+
+        <label class="selectLabel">Questions this session</label>
+        <select id="questionCount">
+          <option value="5">5 — Quick check</option>
+          <option value="8" selected>8 — Short round</option>
+          <option value="12">12 — Focused round</option>
+          <option value="20">20 — Extended round</option>
+        </select>
+
+        <label class="check"><input type="checkbox" id="avoidAsked" checked> Prioritize questions not previously shown to this Staff ID</label>
+        <label class="check"><input type="checkbox" id="hideNotRelevant" checked> Exclude questions marked Not Relevant in this unit</label>
+        <div id="matchSummary" class="matchSummary"></div>
+        <div class="nav"><button class="secondary" data-back="modeScreen">Back</button><button id="startSession" class="primary grow">Start Session</button></div>
+      </div>
+    </section>
+
+    <section id="questionScreen" class="screen">
+      <div class="card questionCard">
+        <div class="questionTop">
+          <div>
+            <div id="questionBadges" class="badges"></div>
+            <div id="questionContext" class="micro"></div>
+          </div>
+          <button id="pinBtn" class="pin">☆ Pin</button>
+        </div>
+        <div class="progress"><div id="progressFill"></div></div>
+        <div id="questionText" class="questionText"></div>
+
+        <div class="infoGrid">
+          <button class="info" data-info="expected">JCI Expected</button>
+          <button class="info" data-info="policy">Dallah Policy</button>
+          <button class="info" data-info="standard">Standard</button>
+          <button class="info" data-info="me">ME</button>
+        </div>
+
+        <div id="reviewPanel" class="reviewPanel">
+          <div class="reviewHeader"><span id="reviewLabel">Operational Review</span><b id="reviewCurrent">Pending</b></div>
+          <div id="reviewButtons" class="reviewButtons"></div>
+          <label>Short note — optional</label>
+          <textarea id="reviewNote" placeholder="e.g. too long / unclear / not related to ICU / ask as scenario..."></textarea>
+        </div>
+
+        <div class="nav triple">
+          <button id="prevQuestion" class="secondary">Previous</button>
+          <button id="skipQuestion" class="secondary">Skip</button>
+          <button id="nextQuestion" class="primary grow">Save & Next</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="summaryScreen" class="screen">
+      <div class="card">
+        <h2>Session Complete</h2>
+        <div id="sessionSummary"></div>
+        <div class="nav"><button id="sameStaffNewSelection" class="secondary">New Selection</button><button id="newStaffRound" class="primary grow">Another Staff</button></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button data-nav="unitScreen"><span>⌂</span>Units</button>
+    <button id="quickGeneral"><span>★</span>General</button>
+    <button id="quickReview"><span>✓</span>Review</button>
+    <button id="backupNav"><span>↥</span>Backup</button>
+  </nav>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="sheet">
+    <div class="sheetHead"><h3 id="modalTitle"></h3><button id="modalClose">×</button></div>
+    <div id="modalBody" class="sheetBody"></div>
+  </div>
+</div>
+
+<input type="file" id="backupFile" accept=".json,application/json" hidden>
+<div id="toast" class="toast hidden"></div>
+
+<script src="./app.js"></script>
+</body>
+</html>
