@@ -1,5 +1,5 @@
 
-const DB_NAME="JCITracerLocalV03", DB_VERSION=2, APP_VERSION="0.4.0";
+const DB_NAME="JCITracerLocalV03", DB_VERSION=2, APP_VERSION="0.4.1";
 const roleAllowed={SN:["SN"],CN:["SN","CN"],HN:["SN","CN","HN"]};
 let master=null;
 let state={unit:null,staffId:"",role:null,mode:null,tiers:["E1"],tags:[],chapters:[],session:[],index:0,responses:{},sourceType:"Generated",sourceName:"",bankUnit:null,bankRole:"SN",bankSelected:[],savedUnit:null,reviewUnit:null,resultUnit:null};
@@ -20,7 +20,10 @@ function toast(msg){$('toast').textContent=msg;$('toast').classList.remove('hidd
 function unitReviewKey(unit,qid){return `UNIT|${unit}|${qid}`}
 function gcReviewKey(qid){return `GC|${qid}`}
 async function getReview(key){return await idbGet('reviews',key)}
-async function saveReview(key,status,note=''){await idbPut('reviews',{key,status,note,updated:new Date().toISOString()})}
+async function saveReview(key,status,note='',proposedRewrite=''){
+  const old=await idbGet('reviews',key)||{key};
+  await idbPut('reviews',{...old,key,status,note,proposedRewrite,updated:new Date().toISOString()})
+}
 async function getStaff(id=state.staffId){if(!id)return null;return (await idbGet('staff',id))||{id,asked:[]}}
 function askedSet(staff){return new Set((staff?.asked||[]).map(x=>x.qid))}
 async function markAsked(q,result){if(!state.staffId||!q||result==='Not Asked'||!result)return;let s=await getStaff();if(!s.asked.some(x=>x.qid===q.id))s.asked.push({qid:q.id,unit:state.unit,role:state.role,date:new Date().toISOString()});await idbPut('staff',s)}
@@ -50,7 +53,57 @@ function renderSelection(){$('selectionList').innerHTML=state.bankSelected.map((
 function moveSelected(i,d){const j=i+d;if(j<0||j>=state.bankSelected.length)return;[state.bankSelected[i],state.bankSelected[j]]=[state.bankSelected[j],state.bankSelected[i]];renderSelection()}
 $('startManual').onclick=async()=>{const id=(prompt('Enter Staff ID for this Manual Session:')||'').trim();if(!id)return;state.unit=state.bankUnit;state.role=state.bankRole;state.staffId=id;state.session=state.bankSelected.map(qById).filter(Boolean);state.responses={};state.index=0;state.sourceType='Manual';state.sourceName='Manual Session';show('questionScreen');await renderQuestion()};
 $('saveTemplate').onclick=async()=>{const name=(prompt('Name this Saved Session:')||'').trim();if(!name)return;await idbAdd('templates',{name,unit:state.bankUnit,role:state.bankRole,qids:[...state.bankSelected],created:new Date().toISOString(),updated:new Date().toISOString()});toast('Saved Session created')};
-function openQuestionDetails(qid,unit){const q=qById(qid);if(!q)return;let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div><div class="sourceBlock"><b>Chapter / Role / Type</b><br>${q.chapter} • ${roleFor(q,unit)} • ${q.typeByUnit[unit]||''}</div><div class="sourceBlock"><b>General Core</b><br>${q.generalCore?`${q.generalCore.tier} — ${escapeHtml(q.generalCore.topic)}`:'No'}</div><div class="sourceBlock"><b>Situation tags</b><br>${escapeHtml(q.tags.join(', ')||'—')}</div><div class="sourceBlock"><b>JCI Expected Answer</b><br>${escapeHtml(q.expected||'—').replace(/\n/g,'<br>')}</div><div class="sourceBlock"><b>Dallah Policy Answer</b><br>${escapeHtml(q.policy||'Policy verification pending').replace(/\n/g,'<br>')}</div><div class="sourceBlock"><b>Standard / ME</b><br>${escapeHtml(q.standard||'—').replace(/\n/g,'<br>')}<br>${escapeHtml(q.me||'—').replace(/\n/g,'<br>')}</div><div class="actions"><button class="secondary" id="detailReviewBtn">Review Question</button></div>`;openModal('Question Details',body,true);setTimeout(()=>{const b=$('detailReviewBtn');if(b)b.onclick=()=>openQuestionReviewModal(q,unit)},0)}
+function sourceGroups(q){
+  const groups={};
+  (q.sourceRefs||[]).forEach(r=>{
+    if(!r.standard)return;
+    if(!groups[r.standard])groups[r.standard]={standard:r.standard,standardStatement:r.standardStatement||'',intent:r.intent||'',page:r.page||'',mes:[]};
+    if(r.me&&!groups[r.standard].mes.some(m=>m.me===r.me))groups[r.standard].mes.push({me:r.me,text:r.meText||'',page:r.page||''});
+    if(!groups[r.standard].intent&&r.intent)groups[r.standard].intent=r.intent;
+    if(!groups[r.standard].standardStatement&&r.standardStatement)groups[r.standard].standardStatement=r.standardStatement;
+  });
+  return Object.values(groups)
+}
+function buildSourceButtons(q){
+  const groups=sourceGroups(q);
+  if(!groups.length)return `<span class="micro">${escapeHtml(q.standard||'No scored Standard')} • ${escapeHtml(q.me||'No scored ME')}</span>`;
+  return groups.map((g,gi)=>`<div class="jciRefRow">
+    <div class="jciRefCode">${escapeHtml(g.standard)}</div>
+    <div class="jciRefButtons">
+      <button class="sourceRefBtn" data-gi="${gi}" data-kind="standard">Standard</button>
+      ${g.intent?`<button class="sourceRefBtn" data-gi="${gi}" data-kind="intent">Intent</button>`:''}
+      ${g.mes.map((m,mi)=>`<button class="sourceRefBtn" data-gi="${gi}" data-mi="${mi}" data-kind="me">${escapeHtml(m.me)}</button>`).join('')}
+    </div>
+  </div>`).join('')
+}
+function bindSourceButtons(q){
+  const groups=sourceGroups(q);
+  document.querySelectorAll('.sourceRefBtn').forEach(b=>b.onclick=()=>{
+    const g=groups[Number(b.dataset.gi)],kind=b.dataset.kind;
+    if(!g)return;
+    if(kind==='standard')openSourceModal(`${g.standard} — Standard`,g.standardStatement||'Official Standard Statement not available in this database.',g.page);
+    if(kind==='intent')openSourceModal(`${g.standard} — Intent`,g.intent||'Official Intent not available in this database.',g.page);
+    if(kind==='me'){const m=g.mes[Number(b.dataset.mi)];openSourceModal(`${g.standard} — ${m.me}`,m.text||'Official ME text not available in this database.',m.page||g.page)}
+  })
+}
+function openQuestionDetails(qid,unit){
+  const q=qById(qid);if(!q)return;
+  const meta=[
+    q.chapter,
+    roleFor(q,unit),
+    q.typeByUnit[unit]||'',
+    q.generalCore?`${q.generalCore.tier} General`:'Not General',
+    q.tags?.length?`Situation: ${q.tags.join(', ')}`:'No Situation Tag'
+  ].filter(Boolean).map(x=>`<span class="detailMetaChip">${escapeHtml(x)}</span>`).join('');
+  let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div>
+  <div class="detailMetaRow">${meta}</div>
+  <div class="sourceBlock"><b>JCI Expected Answer</b><br>${escapeHtml(q.expected||'—').replace(/\n/g,'<br>')}</div>
+  <div class="sourceBlock"><b>Dallah Policy Answer</b><br>${escapeHtml(q.policy||'Policy verification pending').replace(/\n/g,'<br>')}${q.policyRef?`<div class="micro">Policy Ref: ${escapeHtml(q.policyRef)}</div>`:''}</div>
+  <div class="sourceBlock"><b>JCI Source Reference</b><div class="micro">Tap Standard, Intent, or any ME to read the official source text.</div>${buildSourceButtons(q)}</div>
+  <div class="actions"><button class="secondary" id="detailReviewBtn">Review Question / Add Rewrite Note</button></div>`;
+  openModal('Question Details',body,true);
+  setTimeout(()=>{bindSourceButtons(q);const b=$('detailReviewBtn');if(b)b.onclick=()=>openQuestionReviewModal(q,unit)},0)
+}
 
 // SAVED SESSIONS
 async function openSavedUnit(u){state.savedUnit=u;$('savedHeading').textContent=`${unitName(u)} — Saved Sessions`;await renderSavedList();show('savedScreen')}
@@ -66,14 +119,84 @@ async function renderQuestion(){const q=currentQ();if(!q)return finishSession();
 document.querySelectorAll('.resultButtons button').forEach(b=>b.onclick=()=>{const q=currentQ();state.responses[q.id]={...(state.responses[q.id]||{}),result:b.dataset.result,note:$('staffNote').value.trim()};renderQuestion()});$('staffNote').oninput=()=>{const q=currentQ();state.responses[q.id]={...(state.responses[q.id]||{}),note:$('staffNote').value};};$('pinBtn').onclick=async()=>{const k=`${state.unit}|${currentQ().id}`,rec=await idbGet('kv','pins'),pins=new Set(rec?.value||[]);pins.has(k)?pins.delete(k):pins.add(k);await idbPut('kv',{key:'pins',value:[...pins]});await renderQuestion()};$('questionIssueBtn').onclick=()=>openQuestionReviewModal(currentQ(),state.unit);$('nextQuestion').onclick=async()=>{await persistCurrentResponse();if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};$('prevQuestion').onclick=async()=>{await persistCurrentResponse();if(state.index>0){state.index--;await renderQuestion()}};$('skipQuestion').onclick=async()=>{const q=currentQ();state.responses[q.id]={result:'Not Asked',note:$('staffNote').value.trim()};if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};
 async function persistCurrentResponse(){const q=currentQ();if(!q)return;const r=state.responses[q.id]||{};if($('staffNote'))r.note=$('staffNote').value.trim();state.responses[q.id]=r;await markAsked(q,r.result)}
 function showInfo(kind){const q=currentQ();let title='',body='';if(kind==='expected'){title='JCI Expected Answer';body=escapeHtml(q.expected||'No expected-answer text available.').replace(/\n/g,'<br>')}if(kind==='policy'){title='Dallah Policy Answer';body=escapeHtml(q.policy||'Policy verification pending / no Dallah policy answer currently populated.').replace(/\n/g,'<br>');if(q.policyRef)body+=`<div class="sourceBlock"><b>Policy Ref</b><br>${escapeHtml(q.policyRef)}</div>`}if(kind==='standard'){title='Official Standard';if(q.sourceRefs?.length){const seen=new Set();body=q.sourceRefs.filter(r=>r.standard&&!seen.has(r.standard)&&seen.add(r.standard)).map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard)}</b><br>${escapeHtml(r.standardStatement||'')}</div>`).join('')}else body=escapeHtml(q.standard||'No scored Standard')}if(kind==='me'){title='Official Measurable Element';body=q.sourceRefs?.length?q.sourceRefs.map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard)} — ${escapeHtml(r.me)}</b><br>${escapeHtml(r.meText||'')}<div class="micro">Manual p. ${escapeHtml(r.page||'—')}</div></div>`).join(''):escapeHtml(q.me||'No scored ME')}openModal(title,body,true)}document.querySelectorAll('.info').forEach(b=>b.onclick=()=>showInfo(b.dataset.info));
-async function openQuestionReviewModal(q,unit){const ur=await getReview(unitReviewKey(unit,q.id)),gr=q.generalCore?await getReview(gcReviewKey(q.id)):null;let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div><div class="sourceBlock"><b>Unit Question Review</b><br><div class="actions"><button class="secondary qrv" data-qstatus="Approved">Good</button><button class="secondary qrv" data-qstatus="Needs Rewrite">Needs Rewrite</button><button class="secondary qrv" data-qstatus="Not Relevant">Not Relevant</button><button class="secondary qrv" data-qstatus="Local Check">Local Check</button><button class="secondary qrv" data-qstatus="Hold">Hold</button></div><div class="micro">Current: ${escapeHtml(ur?.status||'Unreviewed')}</div></div>`;if(q.generalCore)body+=`<div class="sourceBlock"><b>General Core Decision</b><br><div class="actions"><button class="secondary gcrv" data-gstatus="Approved General Core">Approve Core</button><button class="secondary gcrv" data-gstatus="Not General Core">Not General</button><button class="secondary gcrv" data-gstatus="Needs Rewrite">Needs Rewrite</button><button class="secondary gcrv" data-gstatus="Local Check">Local Check</button></div><div class="micro">Current: ${escapeHtml(gr?.status||'Pending')}</div></div>`;openModal('Question Review',body,true);setTimeout(()=>{document.querySelectorAll('.qrv').forEach(b=>b.onclick=async()=>{await saveReview(unitReviewKey(unit,q.id),b.dataset.qstatus);toast(b.dataset.qstatus);closeModal();if($('questionScreen').classList.contains('active'))await renderQuestion();if($('questionReviewScreen').classList.contains('active'))await renderQuestionReviewList()});document.querySelectorAll('.gcrv').forEach(b=>b.onclick=async()=>{await saveReview(gcReviewKey(q.id),b.dataset.gstatus);toast(b.dataset.gstatus);closeModal()})},0)}
+async function openQuestionReviewModal(q,unit){
+  const ur=await getReview(unitReviewKey(unit,q.id)),gr=q.generalCore?await getReview(gcReviewKey(q.id)):null;
+  let selectedStatus=ur?.status||'Unreviewed';
+  let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div>
+  <div class="sourceBlock"><b>Unit Question Review</b>
+    <div class="actions">
+      <button class="secondary qrv" data-qstatus="Approved">Good</button>
+      <button class="secondary qrv" data-qstatus="Needs Rewrite">Needs Rewrite</button>
+      <button class="secondary qrv" data-qstatus="Not Relevant">Not Relevant</button>
+      <button class="secondary qrv" data-qstatus="Local Check">Local Check</button>
+      <button class="secondary qrv" data-qstatus="Hold">Hold</button>
+    </div>
+    <div class="micro">Current: <span id="qReviewCurrent">${escapeHtml(selectedStatus)}</span></div>
+    <label>Review note — optional</label>
+    <textarea id="qReviewNote" placeholder="Why does this question need review?">${escapeHtml(ur?.note||'')}</textarea>
+    <label>Proposed rewrite — optional</label>
+    <textarea id="qProposedRewrite" placeholder="Write the wording you want to consider later. This does NOT change the frozen question.">${escapeHtml(ur?.proposedRewrite||'')}</textarea>
+    <div class="micro">Saved here only as a field note. Final wording should be approved and then updated in the controlled Excel master.</div>
+    <div class="actions"><button class="primary grow" id="saveQuestionReview">Save Question Review</button></div>
+  </div>`;
+  if(q.generalCore)body+=`<div class="sourceBlock"><b>General Core Decision</b><br>
+    <div class="actions">
+      <button class="secondary gcrv" data-gstatus="Approved General Core">Approve Core</button>
+      <button class="secondary gcrv" data-gstatus="Not General Core">Not General</button>
+      <button class="secondary gcrv" data-gstatus="Needs Rewrite">Needs Rewrite</button>
+      <button class="secondary gcrv" data-gstatus="Local Check">Local Check</button>
+    </div>
+    <div class="micro">Current: ${escapeHtml(gr?.status||'Pending')}</div>
+  </div>`;
+  openModal('Question Review',body,true);
+  setTimeout(()=>{
+    document.querySelectorAll('.qrv').forEach(b=>b.onclick=()=>{
+      selectedStatus=b.dataset.qstatus;
+      $('qReviewCurrent').textContent=selectedStatus;
+      document.querySelectorAll('.qrv').forEach(x=>x.classList.toggle('active',x===b))
+    });
+    const saveBtn=$('saveQuestionReview');
+    if(saveBtn)saveBtn.onclick=async()=>{
+      await saveReview(unitReviewKey(unit,q.id),selectedStatus,$('qReviewNote').value.trim(),$('qProposedRewrite').value.trim());
+      toast('Question review saved');closeModal();
+      if($('questionScreen').classList.contains('active'))await renderQuestion();
+      if($('questionReviewScreen').classList.contains('active'))await renderQuestionReviewList()
+    };
+    document.querySelectorAll('.gcrv').forEach(b=>b.onclick=async()=>{
+      const old=await getReview(gcReviewKey(q.id));
+      await saveReview(gcReviewKey(q.id),b.dataset.gstatus,old?.note||'',old?.proposedRewrite||'');
+      toast(b.dataset.gstatus)
+    })
+  },0)
+}
 async function finishSession(){await persistCurrentResponse();const responses=state.session.map(q=>({qid:q.id,result:state.responses[q.id]?.result||'Not Asked',note:state.responses[q.id]?.note||''}));const session={date:new Date().toISOString(),unit:state.unit,staffId:state.staffId,role:state.role,sourceType:state.sourceType,sourceName:state.sourceName,qids:state.session.map(q=>q.id),responses};await idbAdd('sessions',session);let c={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);$('sessionSummary').innerHTML=`<div class="listRow"><b>Unit</b><span>${unitName(state.unit)}</span></div><div class="listRow"><b>Staff ID</b><span>${escapeHtml(state.staffId)}</span></div><div class="listRow"><b>Session</b><span>${escapeHtml(state.sourceName)}</span></div><div class="listRow"><b>Understood</b><span class="count">${c.Understood||0}</span></div><div class="listRow"><b>Partial</b><span class="count">${c.Partial||0}</span></div><div class="listRow"><b>Not Understood</b><span class="count">${c['Not Understood']||0}</span></div><div class="listRow"><b>Not Asked</b><span class="count">${c['Not Asked']||0}</span></div>`;show('summaryScreen')}
 $('sameStaffNewSelection').onclick=()=>show('modeScreen');$('newStaffRound').onclick=()=>selectUnit(state.unit);
 
 // REVIEW HOME
 function openReviewHome(){show('reviewHomeScreen')}document.querySelectorAll('.reviewMode').forEach(b=>b.onclick=()=>{const m=b.dataset.reviewmode;if(m==='questions')show('questionReviewUnitScreen');if(m==='staff')show('staffReviewScreen');if(m==='unit')show('unitResultsUnitScreen')});
 async function openQuestionReview(u){state.reviewUnit=u;$('questionReviewHeading').textContent=`${unitName(u)} — Question Review`;$('questionReviewChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');$('questionReviewStatus').value='ACTION';await renderQuestionReviewList();show('questionReviewScreen')}
-$('questionReviewChangeUnit').onclick=()=>show('questionReviewUnitScreen');$('questionReviewStatus').onchange=renderQuestionReviewList;$('questionReviewChapter').onchange=renderQuestionReviewList;async function renderQuestionReviewList(){const reviews=await idbAll('reviews'),rmap=new Map(reviews.map(x=>[x.key,x])),st=$('questionReviewStatus').value,ch=$('questionReviewChapter').value;let p=master.questions.filter(q=>q.units.includes(state.reviewUnit));if(ch!=='ALL')p=p.filter(q=>q.chapter===ch);p=p.filter(q=>{const s=rmap.get(unitReviewKey(state.reviewUnit,q.id))?.status||'Unreviewed';if(st==='ACTION')return ['Needs Rewrite','Local Check','Hold'].includes(s);if(st==='UNREVIEWED')return s==='Unreviewed';if(st==='NOT_RELEVANT')return s==='Not Relevant';return true});$('questionReviewList').innerHTML=p.length?p.map(q=>{const s=rmap.get(unitReviewKey(state.reviewUnit,q.id))?.status||'Unreviewed';return `<div class="bankRow"><div></div><div><div class="bankQ">${escapeHtml(q.question)}</div><div class="miniBadges"><span class="miniBadge">${q.chapter}</span><span class="miniBadge">${s}</span></div></div><button class="detailsBtn secondary qReviewOpen" data-qid="${q.id}">Review</button></div>`}).join(''):'<div class="muted">No questions in this filter.</div>';document.querySelectorAll('.qReviewOpen').forEach(b=>b.onclick=()=>openQuestionReviewModal(qById(b.dataset.qid),state.reviewUnit))}
+$('questionReviewChangeUnit').onclick=()=>show('questionReviewUnitScreen');$('questionReviewStatus').onchange=renderQuestionReviewList;$('questionReviewChapter').onchange=renderQuestionReviewList;async function renderQuestionReviewList(){
+  const reviews=await idbAll('reviews'),rmap=new Map(reviews.map(x=>[x.key,x])),st=$('questionReviewStatus').value,ch=$('questionReviewChapter').value;
+  let p=master.questions.filter(q=>q.units.includes(state.reviewUnit));
+  if(ch!=='ALL')p=p.filter(q=>q.chapter===ch);
+  p=p.filter(q=>{
+    const s=rmap.get(unitReviewKey(state.reviewUnit,q.id))?.status||'Unreviewed';
+    if(st==='ACTION')return ['Needs Rewrite','Local Check','Hold'].includes(s);
+    if(st==='UNREVIEWED')return s==='Unreviewed';
+    if(st==='NOT_RELEVANT')return s==='Not Relevant';
+    return true
+  });
+  $('questionReviewList').innerHTML=p.length?p.map(q=>{
+    const r=rmap.get(unitReviewKey(state.reviewUnit,q.id)),s=r?.status||'Unreviewed';
+    return `<div class="bankRow"><div></div><div>
+      <div class="bankQ">${escapeHtml(q.question)}</div>
+      <div class="miniBadges"><span class="miniBadge">${q.chapter}</span><span class="miniBadge">${s}</span></div>
+      ${r?.note?`<div class="reviewNotePreview"><b>Note:</b> ${escapeHtml(r.note)}</div>`:''}
+      ${r?.proposedRewrite?`<div class="rewritePreview"><b>Proposed:</b> ${escapeHtml(r.proposedRewrite)}</div>`:''}
+    </div><button class="detailsBtn secondary qReviewOpen" data-qid="${q.id}">Review</button></div>`
+  }).join(''):'<div class="muted">No questions in this filter.</div>';
+  document.querySelectorAll('.qReviewOpen').forEach(b=>b.onclick=()=>openQuestionReviewModal(qById(b.dataset.qid),state.reviewUnit))
+}
 $('loadStaffReview').onclick=loadStaffReview;async function loadStaffReview(){const id=$('staffReviewId').value.trim();if(!id)return;const sessions=(await idbAll('sessions')).filter(s=>s.staffId===id).sort((a,b)=>new Date(b.date)-new Date(a.date));let responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>responses.push(r)));const unique=new Set(responses.filter(r=>r.result&&r.result!=='Not Asked').map(r=>r.qid));const counts={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>counts[r.result]=(counts[r.result]||0)+1);let html=`<div class="metricGrid"><div class="metric"><b>${sessions.length}</b><span>Sessions</span></div><div class="metric"><b>${unique.size}</b><span>Unique questions</span></div><div class="metric"><b>${counts.Understood||0}</b><span>Understood</span></div><div class="metric"><b>${(counts.Partial||0)+(counts['Not Understood']||0)}</b><span>Needs follow-up</span></div></div>`;html+=sessions.length?sessions.map(s=>`<div class="sessionCard"><div class="sessionTitle">${escapeHtml(s.sourceName||s.sourceType||'Legacy Session')}</div><div class="sessionMeta">${unitName(s.unit)} • ${new Date(s.date).toLocaleString()} • ${s.role||''}</div>${s.responses?.length?s.responses.map(r=>{const q=qById(r.qid);return `<div class="resultRow"><div>${escapeHtml(q?.question||r.qid)}${r.note?`<div class="micro">${escapeHtml(r.note)}</div>`:''}</div><span class="resultTag ${resultClass(r.result)}">${escapeHtml(r.result)}</span></div>`}).join(''):'<div class="micro">Legacy session — staff result scoring was not recorded in v0.3.</div>'}</div>`).join(''):'<div class="muted">No sessions found for this Staff ID.</div>';$('staffReviewOutput').innerHTML=html}
 function resultClass(r){return r==='Understood'?'rUnderstood':r==='Partial'?'rPartial':r==='Not Understood'?'rNotUnderstood':'rNotAsked'}
 async function openUnitResults(u){state.resultUnit=u;$('unitResultsHeading').textContent=`${unitName(u)} — Unit Results`;await renderUnitResults();show('unitResultsScreen')}
@@ -89,6 +212,16 @@ async function exportBackup(){const out={app:'JCITracerLocalV04',exported:new Da
 $('backupFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!['JCITracerLocalV04','JCITracerLocalV03'].includes(obj.app))throw new Error();await idbClear('reviews');await idbClear('staff');await idbClear('sessions');await idbClear('templates');for(const x of obj.reviews||[])await idbPut('reviews',x);for(const x of obj.staff||[])await idbPut('staff',x);for(const x of obj.sessions||[])await idbAdd('sessions',x);for(const x of obj.templates||[])await idbAdd('templates',x);await idbPut('kv',{key:'pins',value:obj.pins||[]});toast('Backup restored');await openData()}catch(err){alert('Invalid backup file.')}e.target.value=''};
 async function exportSessionsCsv(sessions,name){const rows=[['Date','Unit','Staff ID','Role','Session Type','Session Name','Question ID','Chapter','Question','Result','Note']];sessions.forEach(s=>(s.responses||[]).forEach(r=>{const q=qById(r.qid);rows.push([s.date,unitName(s.unit),s.staffId,s.role||'',s.sourceType||'',s.sourceName||'',r.qid,q?.chapter||'',q?.question||'',r.result||'',r.note||''])}));const csv=rows.map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');downloadBlob('\ufeff'+csv,'text/csv;charset=utf-8',`JCI_${name}_${new Date().toISOString().slice(0,10)}.csv`)}
 function downloadBlob(content,type,name){const blob=new Blob([content],{type}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+
+
+function openSourceModal(title,body,page=''){
+  $('sourceModalTitle').textContent=title;
+  $('sourceModalBody').innerHTML=`${escapeHtml(body||'—').replace(/\n/g,'<br>')}${page?`<div class="micro sourcePage">JCI Manual page ${escapeHtml(page)}</div>`:''}`;
+  $('sourceModal').classList.remove('hidden')
+}
+function closeSourceModal(){$('sourceModal').classList.add('hidden')}
+$('sourceModalClose').onclick=closeSourceModal;
+$('sourceModal').onclick=e=>{if(e.target.id==='sourceModal')closeSourceModal()};
 
 function openModal(title,body,isHtml=false){$('modalTitle').textContent=title;$('modalBody').innerHTML=isHtml?body:escapeHtml(body).replace(/\n/g,'<br>');$('modal').classList.remove('hidden')}function closeModal(){$('modal').classList.add('hidden')}$('modalClose').onclick=closeModal;$('modal').onclick=e=>{if(e.target.id==='modal')closeModal()};
 document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('dataBtn').onclick=openData;document.querySelectorAll('[data-mainnav]').forEach(b=>b.onclick=()=>{const n=b.dataset.mainnav;if(!master)return show('setupScreen');if(n==='unit'){renderUnits();show('unitScreen')}if(n==='bank'){renderUnits();show('bankUnitScreen')}if(n==='saved'){renderUnits();show('savedUnitScreen')}if(n==='review')openReviewHome();if(n==='data')openData()});

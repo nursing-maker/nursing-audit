@@ -14,7 +14,7 @@
 </head>
 <body>
 <div id="app">
-<header class="top"><div><h1>JCI Nursing Tracer</h1><div class="subtitle">Local Tablet Pilot v0.4</div></div><button class="topBtn" id="dataBtn">Data</button></header>
+<header class="top"><div><h1>JCI Nursing Tracer</h1><div class="subtitle">Local Tablet Pilot v0.4.1</div></div><button class="topBtn" id="dataBtn">Data</button></header>
 <main>
 <section id="setupScreen" class="screen"><div class="card"><h2>Local Master Database</h2><p class="muted">Import the JCI question database once. It stays local on this iPad.</p><div id="dbStatus" class="statusCard"></div><div class="actions"><button class="primary" id="importDbBtn">Import Master Database</button></div><input type="file" id="dbFile" accept=".json,application/json" hidden></div></section>
 
@@ -58,6 +58,8 @@
 <nav class="bottom"><button data-mainnav="unit"><span>⌂</span>Units</button><button data-mainnav="bank"><span>▦</span>Bank</button><button data-mainnav="saved"><span>★</span>Sessions</button><button data-mainnav="review"><span>✓</span>Review</button><button data-mainnav="data"><span>↥</span>Data</button></nav>
 </div>
 <div id="modal" class="modal hidden"><div class="sheet"><div class="sheetHead"><h3 id="modalTitle"></h3><button id="modalClose">×</button></div><div id="modalBody" class="sheetBody"></div></div></div>
+<div id="sourceModal" class="modal sourceModal hidden"><div class="sheet sourceSheet"><div class="sheetHead"><h3 id="sourceModalTitle"></h3><button id="sourceModalClose">×</button></div><div id="sourceModalBody" class="sheetBody"></div></div></div>
+
 <input type="file" id="backupFileGlobal" accept=".json,application/json" hidden><div id="toast" class="toast hidden"></div>
 <script src="./app.js"></script>
 </body></html>
