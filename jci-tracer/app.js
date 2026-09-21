@@ -1,259 +1,95 @@
 
-const DB_NAME="JCITracerLocalV03", DB_VERSION=1;
-const APP_VERSION="0.3.0";
+const DB_NAME="JCITracerLocalV03", DB_VERSION=2, APP_VERSION="0.4.0";
 const roleAllowed={SN:["SN"],CN:["SN","CN"],HN:["SN","CN","HN"]};
 let master=null;
-let state={unit:null,staffId:"",role:null,mode:null,tiers:["E1"],tags:[],chapters:[],session:[],index:0};
-
-const $=id=>document.getElementById(id);
-const screens=[...document.querySelectorAll(".screen")];
-
-function openIDB(){
- return new Promise((resolve,reject)=>{
-   const req=indexedDB.open(DB_NAME,DB_VERSION);
-   req.onupgradeneeded=()=>{
-     const db=req.result;
-     if(!db.objectStoreNames.contains("kv"))db.createObjectStore("kv",{keyPath:"key"});
-     if(!db.objectStoreNames.contains("reviews"))db.createObjectStore("reviews",{keyPath:"key"});
-     if(!db.objectStoreNames.contains("staff"))db.createObjectStore("staff",{keyPath:"id"});
-     if(!db.objectStoreNames.contains("sessions"))db.createObjectStore("sessions",{keyPath:"id",autoIncrement:true});
-   };
-   req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
- });
-}
-async function idbGet(store,key){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,"readonly");const r=tx.objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function idbPut(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite");tx.objectStore(store).put(obj);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
-async function idbAdd(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite");tx.objectStore(store).add(obj);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
-async function idbAll(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,"readonly");const r=tx.objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function idbClear(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite");tx.objectStore(store).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
-
-function show(id){screens.forEach(s=>s.classList.remove("active"));$(id).classList.add("active");window.scrollTo({top:0,behavior:"smooth"})}
+let state={unit:null,staffId:"",role:null,mode:null,tiers:["E1"],tags:[],chapters:[],session:[],index:0,responses:{},sourceType:"Generated",sourceName:"",bankUnit:null,bankRole:"SN",bankSelected:[],savedUnit:null,reviewUnit:null,resultUnit:null};
+const $=id=>document.getElementById(id), screens=[...document.querySelectorAll('.screen')];
+function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv',{keyPath:'key'});if(!db.objectStoreNames.contains('reviews'))db.createObjectStore('reviews',{keyPath:'key'});if(!db.objectStoreNames.contains('staff'))db.createObjectStore('staff',{keyPath:'id'});if(!db.objectStoreNames.contains('sessions'))db.createObjectStore('sessions',{keyPath:'id',autoIncrement:true});if(!db.objectStoreNames.contains('templates'))db.createObjectStore('templates',{keyPath:'id',autoIncrement:true});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+async function idbGet(store,key){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readonly'),r=tx.objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbPut(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
+async function idbAdd(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite'),r=tx.objectStore(store).add(obj);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbDelete(store,key){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
+async function idbAll(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readonly'),r=tx.objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function idbClear(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
+function show(id){screens.forEach(s=>s.classList.remove('active'));$(id).classList.add('active');window.scrollTo({top:0,behavior:'smooth'})}
 function unitName(id){return master?.units.find(x=>x.id===id)?.name||id}
-function roleFor(q){return q.roleByUnit[state.unit]||""}
-function eligible(q){return q.units.includes(state.unit)&&roleAllowed[state.role]?.includes(roleFor(q))}
-function toast(msg){$("toast").textContent=msg;$("toast").classList.remove("hidden");setTimeout(()=>$("toast").classList.add("hidden"),1500)}
-function reviewKey(kind,qid){return kind==="gc"?`GC|${qid}`:`UNIT|${state.unit}|${qid}`}
-async function getReview(kind,qid){return await idbGet("reviews",reviewKey(kind,qid))}
-async function setReview(kind,qid,status,note=""){await idbPut("reviews",{key:reviewKey(kind,qid),status,note,updated:new Date().toISOString()})}
-async function getStaff(){if(!state.staffId)return null;return (await idbGet("staff",state.staffId))||{id:state.staffId,asked:[]}}
+function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function roleFor(q,u=state.unit){return q.roleByUnit[u]||''}
+function eligibleRole(q,unit,role){return q.units.includes(unit)&&roleAllowed[role]?.includes(roleFor(q,unit))}
+function toast(msg){$('toast').textContent=msg;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),1500)}
+function unitReviewKey(unit,qid){return `UNIT|${unit}|${qid}`}
+function gcReviewKey(qid){return `GC|${qid}`}
+async function getReview(key){return await idbGet('reviews',key)}
+async function saveReview(key,status,note=''){await idbPut('reviews',{key,status,note,updated:new Date().toISOString()})}
+async function getStaff(id=state.staffId){if(!id)return null;return (await idbGet('staff',id))||{id,asked:[]}}
 function askedSet(staff){return new Set((staff?.asked||[]).map(x=>x.qid))}
-async function markAsked(q){let s=await getStaff();if(!s)return;if(!s.asked.some(x=>x.qid===q.id)){s.asked.push({qid:q.id,unit:state.unit,role:state.role,date:new Date().toISOString()});await idbPut("staff",s)}}
+async function markAsked(q,result){if(!state.staffId||!q||result==='Not Asked'||!result)return;let s=await getStaff();if(!s.asked.some(x=>x.qid===q.id))s.asked.push({qid:q.id,unit:state.unit,role:state.role,date:new Date().toISOString()});await idbPut('staff',s)}
+async function init(){const m=await idbGet('kv','master');master=m?.value||null;if('serviceWorker' in navigator){try{const reg=await navigator.serviceWorker.register('./service-worker.js');reg.update()}catch(e){}}try{if(navigator.storage?.persist)await navigator.storage.persist()}catch(e){}if(master){renderUnits();show('unitScreen')}else{renderDbStatus();show('setupScreen')}}
+function renderDbStatus(){$('dbStatus').innerHTML=master?`<b>Database ready</b><br>${master.databaseVersion}<br>${master.questionCount} questions • ${master.generalCoreCandidateCount} General Core candidates`:`<b>No question database imported yet.</b><br>Choose the supplied local Master DB JSON.`}
+$('importDbBtn').onclick=()=>$('dbFile').click();$('dbFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!obj.questions||!obj.units)throw new Error();master=obj;await idbPut('kv',{key:'master',value:obj,imported:new Date().toISOString()});renderUnits();show('unitScreen');toast('Master database imported')}catch(err){alert('Invalid JCI Tracer master database file.')}e.target.value=''};
+function unitButtons(target,handler,withCounts=true){$(target).innerHTML=master.units.map(u=>`<button class="choice unitBtn" data-unit="${u.id}">${escapeHtml(u.name)}${withCounts?`<small>${master.questions.filter(q=>q.units.includes(u.id)).length} frozen questions</small>`:''}</button>`).join('');document.querySelectorAll(`#${target} .unitBtn`).forEach(b=>b.onclick=()=>handler(b.dataset.unit))}
+function renderUnits(){unitButtons('unitGrid',selectUnit);unitButtons('bankUnitGrid',openBank);unitButtons('savedUnitGrid',openSavedUnit,false);unitButtons('questionReviewUnitGrid',openQuestionReview,false);unitButtons('unitResultsUnitGrid',openUnitResults,false)}
+function selectUnit(u){state.unit=u;state.staffId='';state.role=null;state.mode=null;state.responses={};$('staffId').value='';document.querySelectorAll('.role').forEach(b=>b.classList.remove('selected'));$('staffStats').classList.add('hidden');$('staffHeading').textContent=`${unitName(u)} — Staff & Role`;show('staffScreen')}
+document.querySelectorAll('.role').forEach(b=>b.onclick=async()=>{state.role=b.dataset.role;document.querySelectorAll('.role').forEach(x=>x.classList.toggle('selected',x===b));await renderStaffStats()});$('staffId').oninput=async()=>{state.staffId=$('staffId').value.trim();await renderStaffStats()};async function renderStaffStats(){state.staffId=$('staffId').value.trim();if(!state.staffId||!state.role){$('staffStats').classList.add('hidden');return}const s=await getStaff(),asked=askedSet(s),all=master.questions.filter(q=>eligibleRole(q,state.unit,state.role)),gc=all.filter(q=>q.generalCore),reviews=await idbAll('reviews'),reviewed=all.filter(q=>reviews.some(r=>r.key===unitReviewKey(state.unit,q.id))).length;$('staffStats').innerHTML=`<div class="stat"><b>${asked.size}</b><span>Previously asked</span></div><div class="stat"><b>${gc.filter(q=>asked.has(q.id)).length}/${gc.length}</b><span>General Core asked</span></div><div class="stat"><b>${reviewed}/${all.length}</b><span>Question review</span></div>`;$('staffStats').classList.remove('hidden')}
+$('staffContinue').onclick=()=>{state.staffId=$('staffId').value.trim();if(!state.staffId)return alert('Enter Staff ID.');if(!state.role)return alert('Choose a role.');$('roundContext').textContent=`${unitName(state.unit)} • Staff ${state.staffId} • ${state.role==='SN'?'Staff Nurse':state.role==='CN'?'Charge Nurse':'Head Nurse'}`;show('modeScreen')};
+document.querySelectorAll('.mode[data-mode]').forEach(b=>b.onclick=()=>chooseMode(b.dataset.mode));async function chooseMode(mode){state.mode=mode;state.tiers=['E1'];state.tags=[];state.chapters=[];document.querySelectorAll('.tier').forEach(x=>x.classList.toggle('selected',x.dataset.tier==='E1'));$('generalBuilder').classList.toggle('hidden',mode!=='general');$('patientBuilder').classList.toggle('hidden',mode!=='patient');$('chapterBuilder').classList.toggle('hidden',mode!=='chapter');const titles={general:'General Core',patient:'Patient-Driven',chapter:'By Chapter'},helps={general:'General Core candidates / approved questions. The question remains in its original Chapter.',patient:'Select one or more patient situations/devices.',chapter:'Select one or more JCI chapters.'};$('builderTitle').textContent=titles[mode];$('builderHelp').textContent=helps[mode];renderSelectors();await updateMatchSummary();show('builderScreen')}
+function renderSelectors(){$('tagGrid').innerHTML=master.tags.map(t=>`<button class="chip tag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('');document.querySelectorAll('.tag').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');state.tags=b.classList.contains('selected')?[...new Set([...state.tags,b.dataset.tag])]:state.tags.filter(x=>x!==b.dataset.tag);await updateMatchSummary()});$('chapterGrid').innerHTML=master.chapters.map(c=>`<button class="chip chapter" data-chapter="${c}">${c}</button>`).join('');document.querySelectorAll('.chapter').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');state.chapters=b.classList.contains('selected')?[...new Set([...state.chapters,b.dataset.chapter])]:state.chapters.filter(x=>x!==b.dataset.chapter);await updateMatchSummary()})}
+document.querySelectorAll('.tier').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');state.tiers=b.classList.contains('selected')?[...new Set([...state.tiers,b.dataset.tier])]:state.tiers.filter(x=>x!==b.dataset.tier);await updateMatchSummary()});$('questionCount').onchange=()=>{$('customCount').classList.toggle('hidden',$('questionCount').value!=='custom');updateMatchSummary()};['gcDecisionFilter','avoidAsked','hideNotRelevant','customCount'].forEach(id=>$(id).onchange=updateMatchSummary);
+async function generatedPool(){let p=master.questions.filter(q=>eligibleRole(q,state.unit,state.role)),reviews=await idbAll('reviews'),rmap=new Map(reviews.map(x=>[x.key,x]));if($('hideNotRelevant').checked)p=p.filter(q=>rmap.get(unitReviewKey(state.unit,q.id))?.status!=='Not Relevant');if(state.mode==='general'){p=p.filter(q=>q.generalCore&&state.tiers.includes(q.generalCore.tier));const f=$('gcDecisionFilter').value;if(f!=='all')p=p.filter(q=>{const s=rmap.get(gcReviewKey(q.id))?.status||'Pending';return f==='approved'?s==='Approved General Core':s==='Pending'})}if(state.mode==='patient')p=p.filter(q=>state.tags.length&&q.tags.some(t=>state.tags.includes(t)));if(state.mode==='chapter')p=p.filter(q=>state.chapters.length&&state.chapters.includes(q.chapter));return p}
+async function updateMatchSummary(){if(!state.unit||!state.role)return;const p=await generatedPool(),s=await getStaff(),asked=askedSet(s),fresh=p.filter(q=>!asked.has(q.id)).length;$('matchSummary').innerHTML=`<b>${p.length}</b> matching questions • <b>${fresh}</b> not previously asked to this Staff ID`}
+$('startSession').onclick=async()=>{if(state.mode==='general'&&!state.tiers.length)return alert('Choose at least one tier.');if(state.mode==='patient'&&!state.tags.length)return alert('Choose at least one patient/situation.');if(state.mode==='chapter'&&!state.chapters.length)return alert('Choose at least one chapter.');let p=await generatedPool();if(!p.length)return alert('No questions match this selection.');const s=await getStaff(),asked=askedSet(s),pins=new Set((await idbGet('kv','pins'))?.value||[]);p.sort((a,b)=>{if($('avoidAsked').checked){const aa=asked.has(a.id)?1:0,bb=asked.has(b.id)?1:0;if(aa!==bb)return aa-bb}const pa=pins.has(`${state.unit}|${a.id}`)?0:1,pb=pins.has(`${state.unit}|${b.id}`)?0:1;if(pa!==pb)return pa-pb;const tr=q=>q.generalCore?({E1:0,E2:1,E3:2}[q.generalCore.tier]??3):3;if(tr(a)!==tr(b))return tr(a)-tr(b);return master.chapters.indexOf(a.chapter)-master.chapters.indexOf(b.chapter)});let n=p.length,v=$('questionCount').value;if(v==='custom')n=Math.max(1,Math.min(p.length,Number($('customCount').value)||1));else if(v!=='all')n=Math.min(p.length,Number(v));state.session=p.slice(0,n);state.index=0;state.responses={};state.sourceType='Generated';state.sourceName=state.mode==='general'?'General Core':state.mode==='patient'?`Patient-Driven: ${state.tags.join(', ')}`:`Chapter: ${state.chapters.join(', ')}`;show('questionScreen');await renderQuestion()};
 
-async function init(){
- const m=await idbGet("kv","master");
- master=m?.value||null;
- renderDbStatus();
- if("serviceWorker" in navigator){try{await navigator.serviceWorker.register("./service-worker.js");navigator.serviceWorker.ready.then(r=>r.update())}catch(e){}}
- try{if(navigator.storage?.persist)await navigator.storage.persist()}catch(e){}
-}
-function renderDbStatus(){
- if(master){
-   $("dbStatus").innerHTML=`<b>Database ready</b><br>${master.databaseVersion}<br>${master.questionCount} questions • ${master.generalCoreCandidateCount} General Core candidates`;
-   $("continueBtn").classList.remove("hidden");$("continueBtn").textContent="Start";
- }else{
-   $("dbStatus").innerHTML=`<b>No question database imported yet.</b><br>Save the supplied Master DB JSON in iPad Files, then tap Import Master Database once.`;
-   $("continueBtn").classList.add("hidden");
- }
-}
-$("importDbBtn").onclick=()=>$("dbFile").click();
-$("dbFile").onchange=async e=>{
- const f=e.target.files[0];if(!f)return;
- try{
-   const obj=JSON.parse(await f.text());
-   if(!obj.questions||!obj.units||!obj.databaseVersion)throw new Error("Invalid database");
-   master=obj;await idbPut("kv",{key:"master",value:obj,imported:new Date().toISOString()});
-   renderDbStatus();toast("Master database imported");
- }catch(err){alert("This is not a valid JCI Tracer master database file.");}
- e.target.value="";
-};
-$("continueBtn").onclick=()=>{renderUnits();show("unitScreen")};
+// BANK
+function openBank(u){state.bankUnit=u;state.bankRole='SN';state.bankSelected=[];$('bankRole').value='SN';$('bankType').value='ALL';$('bankSearch').value='';$('bankHeading').textContent=`${unitName(u)} — Question Bank`;$('bankChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');renderBank();show('bankScreen')}
+$('bankChangeUnit').onclick=()=>show('bankUnitScreen');['bankRole','bankType','bankChapter'].forEach(id=>$(id).onchange=()=>{if(id==='bankRole')state.bankRole=$(id).value;renderBank()});$('bankSearch').oninput=renderBank;
+function bankFiltered(){let p=master.questions.filter(q=>eligibleRole(q,state.bankUnit,state.bankRole));const t=$('bankType').value,c=$('bankChapter').value,s=$('bankSearch').value.trim().toLowerCase();if(t!=='ALL')p=p.filter(q=>q.typeByUnit[state.bankUnit]===t);if(c!=='ALL')p=p.filter(q=>q.chapter===c);if(s)p=p.filter(q=>(q.question+' '+q.standard+' '+q.me+' '+(q.generalCore?.topic||'')+' '+q.tags.join(' ')).toLowerCase().includes(s));return p}
+function renderBank(){const p=bankFiltered();$('bankCount').textContent=`${p.length} questions shown • Target role: ${$('bankRole').value}`;$('selectedCount').textContent=`${state.bankSelected.length} selected`;let html='',last='';for(const q of p){if(q.chapter!==last){last=q.chapter;html+=`<div class="chapterHeader">${q.chapter}</div>`}const checked=state.bankSelected.includes(q.id)?'checked':'';html+=`<div class="bankRow"><input type="checkbox" class="bankCheck" data-qid="${q.id}" ${checked}><div><div class="bankQ">${escapeHtml(q.question)}</div><div class="miniBadges"><span class="miniBadge">${roleFor(q,state.bankUnit)}</span><span class="miniBadge">${q.typeByUnit[state.bankUnit]||''}</span>${q.generalCore?`<span class="miniBadge">${q.generalCore.tier} General</span>`:''}</div></div><button class="detailsBtn secondary" data-detail="${q.id}">Details</button></div>`}$('bankList').innerHTML=html||'<div class="muted">No matching questions.</div>';document.querySelectorAll('.bankCheck').forEach(ch=>ch.onchange=()=>{const id=ch.dataset.qid;if(ch.checked){if(!state.bankSelected.includes(id))state.bankSelected.push(id)}else state.bankSelected=state.bankSelected.filter(x=>x!==id);$('selectedCount').textContent=`${state.bankSelected.length} selected`});document.querySelectorAll('[data-detail]').forEach(b=>b.onclick=()=>openQuestionDetails(b.dataset.detail,state.bankUnit))}
+$('reviewSelection').onclick=()=>{if(!state.bankSelected.length)return alert('Select at least one question.');renderSelection();show('selectionScreen')};
+function qById(id){return master.questions.find(q=>q.id===id)}
+function renderSelection(){$('selectionList').innerHTML=state.bankSelected.map((id,i)=>{const q=qById(id);return `<div class="selectRow"><span class="selectNum">${i+1}</span><div><b>${q.chapter}</b><div class="bankQ">${escapeHtml(q.question)}</div></div><button class="orderBtn secondary" data-up="${i}">↑</button><button class="orderBtn secondary" data-down="${i}">↓</button><button class="orderBtn secondary" data-remove="${i}">×</button></div>`}).join('');document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>moveSelected(Number(b.dataset.up),-1));document.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>moveSelected(Number(b.dataset.down),1));document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{state.bankSelected.splice(Number(b.dataset.remove),1);renderSelection()})}
+function moveSelected(i,d){const j=i+d;if(j<0||j>=state.bankSelected.length)return;[state.bankSelected[i],state.bankSelected[j]]=[state.bankSelected[j],state.bankSelected[i]];renderSelection()}
+$('startManual').onclick=async()=>{const id=(prompt('Enter Staff ID for this Manual Session:')||'').trim();if(!id)return;state.unit=state.bankUnit;state.role=state.bankRole;state.staffId=id;state.session=state.bankSelected.map(qById).filter(Boolean);state.responses={};state.index=0;state.sourceType='Manual';state.sourceName='Manual Session';show('questionScreen');await renderQuestion()};
+$('saveTemplate').onclick=async()=>{const name=(prompt('Name this Saved Session:')||'').trim();if(!name)return;await idbAdd('templates',{name,unit:state.bankUnit,role:state.bankRole,qids:[...state.bankSelected],created:new Date().toISOString(),updated:new Date().toISOString()});toast('Saved Session created')};
+function openQuestionDetails(qid,unit){const q=qById(qid);if(!q)return;let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div><div class="sourceBlock"><b>Chapter / Role / Type</b><br>${q.chapter} • ${roleFor(q,unit)} • ${q.typeByUnit[unit]||''}</div><div class="sourceBlock"><b>General Core</b><br>${q.generalCore?`${q.generalCore.tier} — ${escapeHtml(q.generalCore.topic)}`:'No'}</div><div class="sourceBlock"><b>Situation tags</b><br>${escapeHtml(q.tags.join(', ')||'—')}</div><div class="sourceBlock"><b>JCI Expected Answer</b><br>${escapeHtml(q.expected||'—').replace(/\n/g,'<br>')}</div><div class="sourceBlock"><b>Dallah Policy Answer</b><br>${escapeHtml(q.policy||'Policy verification pending').replace(/\n/g,'<br>')}</div><div class="sourceBlock"><b>Standard / ME</b><br>${escapeHtml(q.standard||'—').replace(/\n/g,'<br>')}<br>${escapeHtml(q.me||'—').replace(/\n/g,'<br>')}</div><div class="actions"><button class="secondary" id="detailReviewBtn">Review Question</button></div>`;openModal('Question Details',body,true);setTimeout(()=>{const b=$('detailReviewBtn');if(b)b.onclick=()=>openQuestionReviewModal(q,unit)},0)}
 
-function renderUnits(){
- $("unitGrid").innerHTML=master.units.map(u=>{
-   const c=master.questions.filter(q=>q.units.includes(u.id)).length;
-   return `<button class="choice unitChoice" data-unit="${u.id}">${u.name}<small>${c} frozen questions</small></button>`;
- }).join("");
- document.querySelectorAll(".unitChoice").forEach(b=>b.onclick=()=>selectUnit(b.dataset.unit));
-}
-function selectUnit(u){
- state={...state,unit:u,staffId:"",role:null,mode:null,tiers:["E1"],tags:[],chapters:[],session:[],index:0};
- $("staffId").value="";document.querySelectorAll(".role").forEach(b=>b.classList.remove("selected"));
- $("staffStats").classList.add("hidden");$("staffHeading").textContent=`${unitName(u)} — Staff & Role`;show("staffScreen");
-}
-document.querySelectorAll(".role").forEach(b=>b.onclick=async()=>{state.role=b.dataset.role;document.querySelectorAll(".role").forEach(x=>x.classList.toggle("selected",x===b));await renderStaffStats()});
-$("staffId").oninput=async()=>{state.staffId=$("staffId").value.trim();await renderStaffStats()};
-async function renderStaffStats(){
- state.staffId=$("staffId").value.trim();
- if(!state.staffId||!state.role){$("staffStats").classList.add("hidden");return}
- const s=await getStaff(), asked=askedSet(s), all=master.questions.filter(eligible), gc=all.filter(q=>q.generalCore);
- const unitReviews=await idbAll("reviews");const reviewed=all.filter(q=>unitReviews.some(r=>r.key===`UNIT|${state.unit}|${q.id}`)).length;
- $("staffStats").innerHTML=`<div class="stat"><b>${asked.size}</b><span>Previously shown</span></div><div class="stat"><b>${gc.filter(q=>asked.has(q.id)).length}/${gc.length}</b><span>General Core shown</span></div><div class="stat"><b>${reviewed}/${all.length}</b><span>Unit practical review</span></div>`;
- $("staffStats").classList.remove("hidden");
-}
-$("staffContinue").onclick=()=>{
- state.staffId=$("staffId").value.trim();
- if(!state.staffId)return alert("Enter Staff ID.");
- if(!state.role)return alert("Choose a role.");
- $("roundContext").textContent=`${unitName(state.unit)} • Staff ${state.staffId} • ${state.role==="SN"?"Staff Nurse":state.role==="CN"?"Charge Nurse":"Head Nurse"}`;
- show("modeScreen");
-};
+// SAVED SESSIONS
+async function openSavedUnit(u){state.savedUnit=u;$('savedHeading').textContent=`${unitName(u)} — Saved Sessions`;await renderSavedList();show('savedScreen')}
+$('savedChangeUnit').onclick=()=>show('savedUnitScreen');async function renderSavedList(){const t=(await idbAll('templates')).filter(x=>x.unit===state.savedUnit).sort((a,b)=>new Date(b.updated)-new Date(a.updated));$('savedCount').textContent=`${t.length} saved session${t.length===1?'':'s'}`;$('savedList').innerHTML=t.length?t.map(x=>`<div class="savedCard"><div class="savedTitle">${escapeHtml(x.name)}</div><div class="savedMeta">${x.role==='SN'?'Staff Nurse':x.role==='CN'?'Charge Nurse':'Head Nurse'} • ${x.qids.length} questions • ${new Date(x.updated).toLocaleDateString()}</div><div class="savedActions"><button class="primary" data-starttemplate="${x.id}">Start</button><button class="secondary" data-edittemplate="${x.id}">Edit</button><button class="secondary" data-duptemplate="${x.id}">Duplicate</button><button class="secondary" data-deltemplate="${x.id}">Delete</button></div></div>`).join(''):'<div class="muted">No saved sessions for this unit yet. Build one from Bank.</div>';document.querySelectorAll('[data-starttemplate]').forEach(b=>b.onclick=()=>startTemplate(Number(b.dataset.starttemplate)));document.querySelectorAll('[data-edittemplate]').forEach(b=>b.onclick=()=>editTemplate(Number(b.dataset.edittemplate)));document.querySelectorAll('[data-duptemplate]').forEach(b=>b.onclick=()=>duplicateTemplate(Number(b.dataset.duptemplate)));document.querySelectorAll('[data-deltemplate]').forEach(b=>b.onclick=()=>deleteTemplate(Number(b.dataset.deltemplate)))}
+async function startTemplate(id){const t=await idbGet('templates',id);if(!t)return;const staff=(prompt(`Staff ID for ${t.name}:`)||'').trim();if(!staff)return;const s=await getStaff(staff),asked=askedSet(s),prev=t.qids.filter(q=>asked.has(q)).length;if(prev&&!confirm(`${prev} of ${t.qids.length} questions were previously asked to this Staff ID. Start the exact Saved Session anyway?`))return;state.unit=t.unit;state.role=t.role;state.staffId=staff;state.session=t.qids.map(qById).filter(Boolean);state.responses={};state.index=0;state.sourceType='Saved';state.sourceName=t.name;show('questionScreen');await renderQuestion()}
+async function editTemplate(id){const t=await idbGet('templates',id);if(!t)return;state.bankUnit=t.unit;state.bankRole=t.role;state.bankSelected=[...t.qids];$('bankRole').value=t.role;$('bankType').value='ALL';$('bankSearch').value='';$('bankHeading').textContent=`${unitName(t.unit)} — Question Bank`;$('bankChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');renderBank();show('bankScreen');toast('Template loaded into Bank selection. Save with a new name or delete old template.')}
+async function duplicateTemplate(id){const t=await idbGet('templates',id),name=(prompt('Name the duplicate session:',`${t.name} Copy`)||'').trim();if(!name)return;await idbAdd('templates',{...t,id:undefined,name,created:new Date().toISOString(),updated:new Date().toISOString()});await renderSavedList()}
+async function deleteTemplate(id){if(confirm('Delete this Saved Session template? Results from past runs will not be deleted.')){await idbDelete('templates',id);await renderSavedList()}}
 
-document.querySelectorAll(".mode").forEach(b=>b.onclick=()=>chooseMode(b.dataset.mode));
-async function chooseMode(mode){
- state.mode=mode;state.tiers=["E1"];state.tags=[];state.chapters=[];
- document.querySelectorAll(".tier").forEach(x=>x.classList.toggle("selected",x.dataset.tier==="E1"));
- $("generalBuilder").classList.toggle("hidden",mode!=="general");
- $("patientBuilder").classList.toggle("hidden",mode!=="patient");
- $("chapterBuilder").classList.toggle("hidden",mode!=="chapter");
- const titles={general:"General Core",patient:"Patient-Driven",chapter:"By Chapter",review:"Review Unreviewed"};
- const helps={
-   general:"These are the 49 General Core candidates. Suggested E1/E2/E3 is not final until you approve it.",
-   patient:"Choose the real patient situations/devices you see. The app pulls related questions from this unit.",
-   chapter:"Choose one or more chapters.",
-   review:"Continue reviewing questions that do not yet have a unit practical-review decision."
- };
- $("builderTitle").textContent=titles[mode];$("builderHelp").textContent=helps[mode];
- renderSelectors();await updateMatchSummary();show("builderScreen");
-}
-function renderSelectors(){
- if(master){
-   $("tagGrid").innerHTML=master.tags.map(t=>`<button class="chip tag" data-tag="${t.replaceAll('"',"&quot;")}">${t}</button>`).join("");
-   document.querySelectorAll(".tag").forEach(b=>b.onclick=async()=>{b.classList.toggle("selected");state.tags=b.classList.contains("selected")?[...new Set([...state.tags,b.dataset.tag])]:state.tags.filter(x=>x!==b.dataset.tag);await updateMatchSummary()});
-   $("chapterGrid").innerHTML=master.chapters.map(c=>`<button class="chip chapter" data-chapter="${c}">${c}</button>`).join("");
-   document.querySelectorAll(".chapter").forEach(b=>b.onclick=async()=>{b.classList.toggle("selected");state.chapters=b.classList.contains("selected")?[...new Set([...state.chapters,b.dataset.chapter])]:state.chapters.filter(x=>x!==b.dataset.chapter);await updateMatchSummary()});
- }
-}
-document.querySelectorAll(".tier").forEach(b=>b.onclick=async()=>{b.classList.toggle("selected");state.tiers=b.classList.contains("selected")?[...new Set([...state.tiers,b.dataset.tier])]:state.tiers.filter(x=>x!==b.dataset.tier);await updateMatchSummary()});
-["gcDecisionFilter","questionCount","avoidAsked","hideNotRelevant"].forEach(id=>$(id).onchange=updateMatchSummary);
-
-async function buildPool(){
- let p=master.questions.filter(eligible);
- const reviews=await idbAll("reviews");
- const rmap=new Map(reviews.map(x=>[x.key,x]));
- if($("hideNotRelevant").checked)p=p.filter(q=>rmap.get(`UNIT|${state.unit}|${q.id}`)?.status!=="Not Relevant");
- if(state.mode==="general"){
-   p=p.filter(q=>q.generalCore&&state.tiers.includes(q.generalCore.tier));
-   const f=$("gcDecisionFilter").value;
-   if(f!=="all")p=p.filter(q=>{const s=rmap.get(`GC|${q.id}`)?.status||"Pending";return f==="approved"?s==="Approved General Core":s==="Pending"});
- }
- if(state.mode==="patient")p=p.filter(q=>state.tags.length&&q.tags.some(t=>state.tags.includes(t)));
- if(state.mode==="chapter")p=p.filter(q=>state.chapters.length&&state.chapters.includes(q.chapter));
- if(state.mode==="review")p=p.filter(q=>!rmap.has(`UNIT|${state.unit}|${q.id}`));
- return p;
-}
-async function updateMatchSummary(){
- const p=await buildPool(),s=await getStaff(),asked=askedSet(s),fresh=p.filter(q=>!asked.has(q.id)).length;
- $("matchSummary").innerHTML=`<b>${p.length}</b> matching questions • <b>${fresh}</b> not previously shown to this Staff ID`;
-}
-$("startSession").onclick=async()=>{
- if(state.mode==="general"&&!state.tiers.length)return alert("Choose at least one tier.");
- if(state.mode==="patient"&&!state.tags.length)return alert("Choose at least one patient/situation.");
- if(state.mode==="chapter"&&!state.chapters.length)return alert("Choose at least one chapter.");
- let p=await buildPool();if(!p.length)return alert("No questions match this selection.");
- const s=await getStaff(),asked=askedSet(s),reviews=await idbAll("reviews"),pins=new Set((await idbGet("kv","pins"))?.value||[]);
- p.sort((a,b)=>{
-   if($("avoidAsked").checked){const aa=asked.has(a.id)?1:0,bb=asked.has(b.id)?1:0;if(aa!==bb)return aa-bb}
-   const pa=pins.has(`${state.unit}|${a.id}`)?0:1,pb=pins.has(`${state.unit}|${b.id}`)?0:1;if(pa!==pb)return pa-pb;
-   const tr=q=>q.generalCore?({E1:0,E2:1,E3:2}[q.generalCore.tier]??3):3;if(tr(a)!==tr(b))return tr(a)-tr(b);
-   return master.chapters.indexOf(a.chapter)-master.chapters.indexOf(b.chapter);
- });
- state.session=p.slice(0,Number($("questionCount").value));state.index=0;show("questionScreen");await renderQuestion();
-};
-
+// LIVE QUESTION / STAFF RESULT
 function currentQ(){return state.session[state.index]}
-async function renderQuestion(){
- const q=currentQ();if(!q)return finishSession();
- const kind=state.mode==="general"?"gc":"unit",rv=await getReview(kind,q.id),s=await getStaff(),asked=askedSet(s),pins=new Set((await idbGet("kv","pins"))?.value||[]);
- let badges=[];
- if(q.generalCore)badges.push(`<span class="badge ${q.generalCore.tier.toLowerCase()}">${q.generalCore.tier} • ${q.generalCore.topic}</span>`);
- badges.push(`<span class="badge">${q.chapter}</span><span class="badge">${roleFor(q)}</span>`);
- if(asked.has(q.id))badges.push(`<span class="badge">Previously shown</span>`);
- $("questionBadges").innerHTML=badges.join("");
- $("questionContext").textContent=`${unitName(state.unit)} • Staff ${state.staffId} • ${state.index+1}/${state.session.length}`+(q.tags.length?` • ${q.tags.slice(0,3).join(" / ")}`:"");
- $("progressFill").style.width=((state.index+1)/state.session.length*100)+"%";$("questionText").textContent=q.question;
- $("reviewNote").value=rv?.note||"";$("reviewCurrent").textContent=rv?.status||"Pending";
- $("reviewLabel").textContent=kind==="gc"?"General Core Decision":"Unit Practical Review";
- renderReviewButtons(kind,rv?.status||"Pending");
- $("pinBtn").textContent=pins.has(`${state.unit}|${q.id}`)?"★ Pinned":"☆ Pin";
-}
-function renderReviewButtons(kind,status){
- const opts=kind==="gc"?
-   [["Approved General Core","Approve Core","approved"],["Needs Rewrite","Needs Rewrite","rewrite"],["Not General Core","Not General","reject"],["Local Check","Local Check","local"]]:
-   [["Approved","✓ Good","approved"],["Needs Rewrite","Needs Rewrite","rewrite"],["Not Relevant","Not Relevant","reject"],["Local Check","Local Check","local"]];
- $("reviewButtons").innerHTML=opts.map(o=>`<button class="${o[2]} ${status===o[0]?"active":""}" data-status="${o[0]}">${o[1]}</button>`).join("");
- document.querySelectorAll("#reviewButtons button").forEach(b=>b.onclick=async()=>{await setReview(state.mode==="general"?"gc":"unit",currentQ().id,b.dataset.status,$("reviewNote").value.trim());toast(b.dataset.status);await renderQuestion()});
-}
-$("pinBtn").onclick=async()=>{
- const k=`${state.unit}|${currentQ().id}`,rec=await idbGet("kv","pins"),pins=new Set(rec?.value||[]);
- pins.has(k)?pins.delete(k):pins.add(k);await idbPut("kv",{key:"pins",value:[...pins]});await renderQuestion()
-};
-async function persistNote(){
- const q=currentQ();if(!q)return;const kind=state.mode==="general"?"gc":"unit",rv=await getReview(kind,q.id);
- if(rv)await setReview(kind,q.id,rv.status,$("reviewNote").value.trim());
-}
-$("nextQuestion").onclick=async()=>{await persistNote();await markAsked(currentQ());if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};
-$("prevQuestion").onclick=async()=>{await persistNote();if(state.index>0){state.index--;await renderQuestion()}};
-$("skipQuestion").onclick=async()=>{await markAsked(currentQ());if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};
+async function renderQuestion(){const q=currentQ();if(!q)return finishSession();const s=await getStaff(),asked=askedSet(s),pins=new Set((await idbGet('kv','pins'))?.value||[]),resp=state.responses[q.id]||{};let badges=[];if(q.generalCore)badges.push(`<span class="badge ${q.generalCore.tier.toLowerCase()}">${q.generalCore.tier} • ${escapeHtml(q.generalCore.topic)}</span>`);badges.push(`<span class="badge">${q.chapter}</span><span class="badge">${roleFor(q,state.unit)}</span>`);if(asked.has(q.id))badges.push('<span class="badge">Previously asked</span>');$('questionBadges').innerHTML=badges.join('');$('questionContext').textContent=`${unitName(state.unit)} • Staff ${state.staffId} • ${state.sourceName} • ${state.index+1}/${state.session.length}`+(q.tags.length?` • ${q.tags.slice(0,3).join(' / ')}`:'');$('progressFill').style.width=((state.index+1)/state.session.length*100)+'%';$('questionText').textContent=q.question;$('staffResultCurrent').textContent=resp.result||'Not scored';$('staffNote').value=resp.note||'';document.querySelectorAll('.resultButtons button').forEach(b=>b.classList.toggle('active',resp.result===b.dataset.result));$('pinBtn').textContent=pins.has(`${state.unit}|${q.id}`)?'★ Pinned':'☆ Pin';const ur=await getReview(unitReviewKey(state.unit,q.id));$('questionIssueSummary').textContent=ur?.status?`Question: ${ur.status}`:'Question: unreviewed'}
+document.querySelectorAll('.resultButtons button').forEach(b=>b.onclick=()=>{const q=currentQ();state.responses[q.id]={...(state.responses[q.id]||{}),result:b.dataset.result,note:$('staffNote').value.trim()};renderQuestion()});$('staffNote').oninput=()=>{const q=currentQ();state.responses[q.id]={...(state.responses[q.id]||{}),note:$('staffNote').value};};$('pinBtn').onclick=async()=>{const k=`${state.unit}|${currentQ().id}`,rec=await idbGet('kv','pins'),pins=new Set(rec?.value||[]);pins.has(k)?pins.delete(k):pins.add(k);await idbPut('kv',{key:'pins',value:[...pins]});await renderQuestion()};$('questionIssueBtn').onclick=()=>openQuestionReviewModal(currentQ(),state.unit);$('nextQuestion').onclick=async()=>{await persistCurrentResponse();if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};$('prevQuestion').onclick=async()=>{await persistCurrentResponse();if(state.index>0){state.index--;await renderQuestion()}};$('skipQuestion').onclick=async()=>{const q=currentQ();state.responses[q.id]={result:'Not Asked',note:$('staffNote').value.trim()};if(state.index<state.session.length-1){state.index++;await renderQuestion()}else await finishSession()};
+async function persistCurrentResponse(){const q=currentQ();if(!q)return;const r=state.responses[q.id]||{};if($('staffNote'))r.note=$('staffNote').value.trim();state.responses[q.id]=r;await markAsked(q,r.result)}
+function showInfo(kind){const q=currentQ();let title='',body='';if(kind==='expected'){title='JCI Expected Answer';body=escapeHtml(q.expected||'No expected-answer text available.').replace(/\n/g,'<br>')}if(kind==='policy'){title='Dallah Policy Answer';body=escapeHtml(q.policy||'Policy verification pending / no Dallah policy answer currently populated.').replace(/\n/g,'<br>');if(q.policyRef)body+=`<div class="sourceBlock"><b>Policy Ref</b><br>${escapeHtml(q.policyRef)}</div>`}if(kind==='standard'){title='Official Standard';if(q.sourceRefs?.length){const seen=new Set();body=q.sourceRefs.filter(r=>r.standard&&!seen.has(r.standard)&&seen.add(r.standard)).map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard)}</b><br>${escapeHtml(r.standardStatement||'')}</div>`).join('')}else body=escapeHtml(q.standard||'No scored Standard')}if(kind==='me'){title='Official Measurable Element';body=q.sourceRefs?.length?q.sourceRefs.map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard)} — ${escapeHtml(r.me)}</b><br>${escapeHtml(r.meText||'')}<div class="micro">Manual p. ${escapeHtml(r.page||'—')}</div></div>`).join(''):escapeHtml(q.me||'No scored ME')}openModal(title,body,true)}document.querySelectorAll('.info').forEach(b=>b.onclick=()=>showInfo(b.dataset.info));
+async function openQuestionReviewModal(q,unit){const ur=await getReview(unitReviewKey(unit,q.id)),gr=q.generalCore?await getReview(gcReviewKey(q.id)):null;let body=`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question)}</div><div class="sourceBlock"><b>Unit Question Review</b><br><div class="actions"><button class="secondary qrv" data-qstatus="Approved">Good</button><button class="secondary qrv" data-qstatus="Needs Rewrite">Needs Rewrite</button><button class="secondary qrv" data-qstatus="Not Relevant">Not Relevant</button><button class="secondary qrv" data-qstatus="Local Check">Local Check</button><button class="secondary qrv" data-qstatus="Hold">Hold</button></div><div class="micro">Current: ${escapeHtml(ur?.status||'Unreviewed')}</div></div>`;if(q.generalCore)body+=`<div class="sourceBlock"><b>General Core Decision</b><br><div class="actions"><button class="secondary gcrv" data-gstatus="Approved General Core">Approve Core</button><button class="secondary gcrv" data-gstatus="Not General Core">Not General</button><button class="secondary gcrv" data-gstatus="Needs Rewrite">Needs Rewrite</button><button class="secondary gcrv" data-gstatus="Local Check">Local Check</button></div><div class="micro">Current: ${escapeHtml(gr?.status||'Pending')}</div></div>`;openModal('Question Review',body,true);setTimeout(()=>{document.querySelectorAll('.qrv').forEach(b=>b.onclick=async()=>{await saveReview(unitReviewKey(unit,q.id),b.dataset.qstatus);toast(b.dataset.qstatus);closeModal();if($('questionScreen').classList.contains('active'))await renderQuestion();if($('questionReviewScreen').classList.contains('active'))await renderQuestionReviewList()});document.querySelectorAll('.gcrv').forEach(b=>b.onclick=async()=>{await saveReview(gcReviewKey(q.id),b.dataset.gstatus);toast(b.dataset.gstatus);closeModal()})},0)}
+async function finishSession(){await persistCurrentResponse();const responses=state.session.map(q=>({qid:q.id,result:state.responses[q.id]?.result||'Not Asked',note:state.responses[q.id]?.note||''}));const session={date:new Date().toISOString(),unit:state.unit,staffId:state.staffId,role:state.role,sourceType:state.sourceType,sourceName:state.sourceName,qids:state.session.map(q=>q.id),responses};await idbAdd('sessions',session);let c={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);$('sessionSummary').innerHTML=`<div class="listRow"><b>Unit</b><span>${unitName(state.unit)}</span></div><div class="listRow"><b>Staff ID</b><span>${escapeHtml(state.staffId)}</span></div><div class="listRow"><b>Session</b><span>${escapeHtml(state.sourceName)}</span></div><div class="listRow"><b>Understood</b><span class="count">${c.Understood||0}</span></div><div class="listRow"><b>Partial</b><span class="count">${c.Partial||0}</span></div><div class="listRow"><b>Not Understood</b><span class="count">${c['Not Understood']||0}</span></div><div class="listRow"><b>Not Asked</b><span class="count">${c['Not Asked']||0}</span></div>`;show('summaryScreen')}
+$('sameStaffNewSelection').onclick=()=>show('modeScreen');$('newStaffRound').onclick=()=>selectUnit(state.unit);
 
-document.querySelectorAll(".info").forEach(b=>b.onclick=()=>showInfo(b.dataset.info));
-function showInfo(kind){
- const q=currentQ();let title="",body="";
- if(kind==="expected"){title="JCI Expected Answer";body=q.expected||"No expected-answer text available."}
- if(kind==="policy"){title="Dallah Policy Answer";body=q.policy||"Policy verification pending / no Dallah policy answer currently populated.";if(q.policyRef)body+=`\n\nPolicy reference:\n${q.policyRef}`}
- if(kind==="standard"){
-   title="Official Standard";
-   if(q.sourceRefs?.length){const byStd=[];const seen=new Set();q.sourceRefs.forEach(r=>{if(r.standard&&!seen.has(r.standard)){seen.add(r.standard);byStd.push(`<div class="sourceBlock"><b>${escapeHtml(r.standard)}</b><br>${escapeHtml(r.standardStatement||"")}</div>`)}});body=byStd.join("")}
-   else body=`${escapeHtml(q.standard||"No scored Standard")}`;
- }
- if(kind==="me"){
-   title="Official Measurable Element";
-   if(q.sourceRefs?.length){body=q.sourceRefs.map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard)} — ${escapeHtml(r.me)}</b><br>${escapeHtml(r.meText||"")}<div class="micro">Manual p. ${escapeHtml(r.page||"—")}</div></div>`).join("")}
-   else body=`${escapeHtml(q.me||"No scored ME")}`;
- }
- openModal(title,body,kind==="standard"||kind==="me");
-}
-function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
-function openModal(title,body,isHtml=false){$("modalTitle").textContent=title;$("modalBody").innerHTML=isHtml?body:escapeHtml(body).replace(/\n/g,"<br>");$("modal").classList.remove("hidden")}
-function closeModal(){$("modal").classList.add("hidden")}
-$("modalClose").onclick=closeModal;$("modal").onclick=e=>{if(e.target.id==="modal")closeModal()};
+// REVIEW HOME
+function openReviewHome(){show('reviewHomeScreen')}document.querySelectorAll('.reviewMode').forEach(b=>b.onclick=()=>{const m=b.dataset.reviewmode;if(m==='questions')show('questionReviewUnitScreen');if(m==='staff')show('staffReviewScreen');if(m==='unit')show('unitResultsUnitScreen')});
+async function openQuestionReview(u){state.reviewUnit=u;$('questionReviewHeading').textContent=`${unitName(u)} — Question Review`;$('questionReviewChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');$('questionReviewStatus').value='ACTION';await renderQuestionReviewList();show('questionReviewScreen')}
+$('questionReviewChangeUnit').onclick=()=>show('questionReviewUnitScreen');$('questionReviewStatus').onchange=renderQuestionReviewList;$('questionReviewChapter').onchange=renderQuestionReviewList;async function renderQuestionReviewList(){const reviews=await idbAll('reviews'),rmap=new Map(reviews.map(x=>[x.key,x])),st=$('questionReviewStatus').value,ch=$('questionReviewChapter').value;let p=master.questions.filter(q=>q.units.includes(state.reviewUnit));if(ch!=='ALL')p=p.filter(q=>q.chapter===ch);p=p.filter(q=>{const s=rmap.get(unitReviewKey(state.reviewUnit,q.id))?.status||'Unreviewed';if(st==='ACTION')return ['Needs Rewrite','Local Check','Hold'].includes(s);if(st==='UNREVIEWED')return s==='Unreviewed';if(st==='NOT_RELEVANT')return s==='Not Relevant';return true});$('questionReviewList').innerHTML=p.length?p.map(q=>{const s=rmap.get(unitReviewKey(state.reviewUnit,q.id))?.status||'Unreviewed';return `<div class="bankRow"><div></div><div><div class="bankQ">${escapeHtml(q.question)}</div><div class="miniBadges"><span class="miniBadge">${q.chapter}</span><span class="miniBadge">${s}</span></div></div><button class="detailsBtn secondary qReviewOpen" data-qid="${q.id}">Review</button></div>`}).join(''):'<div class="muted">No questions in this filter.</div>';document.querySelectorAll('.qReviewOpen').forEach(b=>b.onclick=()=>openQuestionReviewModal(qById(b.dataset.qid),state.reviewUnit))}
+$('loadStaffReview').onclick=loadStaffReview;async function loadStaffReview(){const id=$('staffReviewId').value.trim();if(!id)return;const sessions=(await idbAll('sessions')).filter(s=>s.staffId===id).sort((a,b)=>new Date(b.date)-new Date(a.date));let responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>responses.push(r)));const unique=new Set(responses.filter(r=>r.result&&r.result!=='Not Asked').map(r=>r.qid));const counts={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>counts[r.result]=(counts[r.result]||0)+1);let html=`<div class="metricGrid"><div class="metric"><b>${sessions.length}</b><span>Sessions</span></div><div class="metric"><b>${unique.size}</b><span>Unique questions</span></div><div class="metric"><b>${counts.Understood||0}</b><span>Understood</span></div><div class="metric"><b>${(counts.Partial||0)+(counts['Not Understood']||0)}</b><span>Needs follow-up</span></div></div>`;html+=sessions.length?sessions.map(s=>`<div class="sessionCard"><div class="sessionTitle">${escapeHtml(s.sourceName||s.sourceType||'Legacy Session')}</div><div class="sessionMeta">${unitName(s.unit)} • ${new Date(s.date).toLocaleString()} • ${s.role||''}</div>${s.responses?.length?s.responses.map(r=>{const q=qById(r.qid);return `<div class="resultRow"><div>${escapeHtml(q?.question||r.qid)}${r.note?`<div class="micro">${escapeHtml(r.note)}</div>`:''}</div><span class="resultTag ${resultClass(r.result)}">${escapeHtml(r.result)}</span></div>`}).join(''):'<div class="micro">Legacy session — staff result scoring was not recorded in v0.3.</div>'}</div>`).join(''):'<div class="muted">No sessions found for this Staff ID.</div>';$('staffReviewOutput').innerHTML=html}
+function resultClass(r){return r==='Understood'?'rUnderstood':r==='Partial'?'rPartial':r==='Not Understood'?'rNotUnderstood':'rNotAsked'}
+async function openUnitResults(u){state.resultUnit=u;$('unitResultsHeading').textContent=`${unitName(u)} — Unit Results`;await renderUnitResults();show('unitResultsScreen')}
+$('unitResultsChangeUnit').onclick=()=>show('unitResultsUnitScreen');$('resultPeriod').onchange=renderUnitResults;function periodStart(){const p=$('resultPeriod').value,now=new Date();if(p==='ALL')return null;if(p==='TODAY')return new Date(now.getFullYear(),now.getMonth(),now.getDate());return new Date(Date.now()-7*86400000)}
+async function filteredResultSessions(){const start=periodStart();return (await idbAll('sessions')).filter(s=>s.unit===state.resultUnit&&(!start||new Date(s.date)>=start))}
+async function renderUnitResults(){const sessions=await filteredResultSessions(),staff=new Set(sessions.map(s=>s.staffId)),responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>{if(r.result&&r.result!=='Not Asked')responses.push({...r,session:s})}));const c={Understood:0,Partial:0,'Not Understood':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);const byQ={};responses.forEach(r=>{const x=byQ[r.qid]||(byQ[r.qid]={asked:0,Understood:0,Partial:0,'Not Understood':0});x.asked++;x[r.result]=(x[r.result]||0)+1});const weak=Object.entries(byQ).map(([qid,x])=>({qid,...x,gap:(x.Partial||0)+(x['Not Understood']||0)})).sort((a,b)=>b.gap-a.gap||b.asked-a.asked);let html=`<div class="metricGrid"><div class="metric"><b>${staff.size}</b><span>Staff assessed</span></div><div class="metric"><b>${sessions.length}</b><span>Sessions</span></div><div class="metric"><b>${responses.length}</b><span>Scored responses</span></div><div class="metric"><b>${(c.Partial||0)+(c['Not Understood']||0)}</b><span>Partial + Not understood</span></div></div><div class="sectionLabel">Questions needing attention</div>`;html+=weak.length?weak.slice(0,30).map(x=>{const q=qById(x.qid);return `<div class="resultRow"><div><b>${q?.chapter||''}</b> — ${escapeHtml(q?.question||x.qid)}<div class="micro">Asked ${x.asked} • Understood ${x.Understood||0} • Partial ${x.Partial||0} • Not Understood ${x['Not Understood']||0}</div></div><span class="count">${x.gap}</span></div>`}).join(''):'<div class="muted">No scored staff responses in this period yet.</div>';$('unitResultsOutput').innerHTML=html}
+$('exportUnitCsv').onclick=async()=>exportSessionsCsv(await filteredResultSessions(),`${state.resultUnit}_${$('resultPeriod').value}_Results`);
 
-async function finishSession(){
- await persistNote();for(const q of state.session)await markAsked(q);
- await idbAdd("sessions",{date:new Date().toISOString(),unit:state.unit,staffId:state.staffId,role:state.role,mode:state.mode,qids:state.session.map(q=>q.id)});
- let approved=0,rewrite=0,reject=0,local=0,pending=0;const kind=state.mode==="general"?"gc":"unit";
- for(const q of state.session){const r=await getReview(kind,q.id),s=r?.status||"Pending";if(s.startsWith("Approved"))approved++;else if(s==="Needs Rewrite")rewrite++;else if(s==="Not Relevant"||s==="Not General Core")reject++;else if(s==="Local Check")local++;else pending++}
- $("sessionSummary").innerHTML=`<div class="listRow"><b>Unit</b><span>${unitName(state.unit)}</span></div><div class="listRow"><b>Staff ID</b><span>${state.staffId}</span></div><div class="listRow"><b>Questions</b><span class="count">${state.session.length}</span></div><div class="listRow"><b>Approved / Good</b><span class="count">${approved}</span></div><div class="listRow"><b>Needs Rewrite</b><span class="count">${rewrite}</span></div><div class="listRow"><b>Rejected / Not Relevant</b><span class="count">${reject}</span></div><div class="listRow"><b>Local Check</b><span class="count">${local}</span></div><div class="listRow"><b>Pending</b><span class="count">${pending}</span></div>`;
- show("summaryScreen");
-}
-$("sameStaffNewSelection").onclick=()=>show("modeScreen");
-$("newStaffRound").onclick=()=>selectUnit(state.unit);
+// DATA / BACKUP
+async function openData(){const staff=await idbAll('staff'),reviews=await idbAll('reviews'),sessions=await idbAll('sessions'),templates=await idbAll('templates');$('dataSummary').innerHTML=`<b>App</b>: v${APP_VERSION}<br><b>Master</b>: ${master?.databaseVersion||'Not imported'}<br><b>Staff IDs</b>: ${staff.length}<br><b>Sessions run</b>: ${sessions.length}<br><b>Saved session templates</b>: ${templates.length}<br><b>Question review decisions</b>: ${reviews.length}`;show('dataScreen')}
+$('exportBackupBtn').onclick=exportBackup;$('importBackupBtn').onclick=()=>$('backupFile').click();$('replaceMasterBtn').onclick=()=>$('dbFile').click();$('exportAllCsvBtn').onclick=async()=>exportSessionsCsv(await idbAll('sessions'),'All_Staff_Results');
+async function exportBackup(){const out={app:'JCITracerLocalV04',exported:new Date().toISOString(),masterInfo:{databaseVersion:master?.databaseVersion||null},reviews:await idbAll('reviews'),staff:await idbAll('staff'),sessions:await idbAll('sessions'),templates:await idbAll('templates'),pins:(await idbGet('kv','pins'))?.value||[]};downloadBlob(JSON.stringify(out,null,2),'application/json',`JCI_Tracer_Backup_${new Date().toISOString().slice(0,10)}.json`)}
+$('backupFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!['JCITracerLocalV04','JCITracerLocalV03'].includes(obj.app))throw new Error();await idbClear('reviews');await idbClear('staff');await idbClear('sessions');await idbClear('templates');for(const x of obj.reviews||[])await idbPut('reviews',x);for(const x of obj.staff||[])await idbPut('staff',x);for(const x of obj.sessions||[])await idbAdd('sessions',x);for(const x of obj.templates||[])await idbAdd('templates',x);await idbPut('kv',{key:'pins',value:obj.pins||[]});toast('Backup restored');await openData()}catch(err){alert('Invalid backup file.')}e.target.value=''};
+async function exportSessionsCsv(sessions,name){const rows=[['Date','Unit','Staff ID','Role','Session Type','Session Name','Question ID','Chapter','Question','Result','Note']];sessions.forEach(s=>(s.responses||[]).forEach(r=>{const q=qById(r.qid);rows.push([s.date,unitName(s.unit),s.staffId,s.role||'',s.sourceType||'',s.sourceName||'',r.qid,q?.chapter||'',q?.question||'',r.result||'',r.note||''])}));const csv=rows.map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');downloadBlob('\ufeff'+csv,'text/csv;charset=utf-8',`JCI_${name}_${new Date().toISOString().slice(0,10)}.csv`)}
+function downloadBlob(content,type,name){const blob=new Blob([content],{type}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
-document.querySelectorAll("[data-back]").forEach(b=>b.onclick=()=>show(b.dataset.back));
-document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{if(master){renderUnits();show(b.dataset.nav)}else show("setupScreen")});
-$("quickGeneral").onclick=()=>{if(state.unit&&state.staffId&&state.role)chooseMode("general");else toast("Choose unit, Staff ID and role first")};
-$("quickReview").onclick=()=>{if(state.unit&&state.staffId&&state.role)chooseMode("review");else toast("Choose unit, Staff ID and role first")};
-
-$("dataBtn").onclick=openData;$("backupNav").onclick=openData;
-async function openData(){
- const staff=await idbAll("staff"),reviews=await idbAll("reviews"),sessions=await idbAll("sessions");
- const msg=`App version: ${APP_VERSION}\nMaster database: ${master?.databaseVersion||"Not imported"}\nStaff IDs with history: ${staff.length}\nSaved review decisions: ${reviews.length}\nSaved sessions: ${sessions.length}\n\nAll operational data are stored locally on this device/browser. Export a backup regularly.`;
- openModal("Local Data & Backup",msg);
- $("modalBody").innerHTML=escapeHtml(msg).replace(/\n/g,"<br>")+`<div class="actions"><button class="primary grow" id="exportBtn">Export Backup</button><button class="secondary grow" id="importBackupBtn">Import Backup</button></div><div class="actions"><button class="secondary grow" id="replaceDbBtn">Replace Master Database</button></div>`;
- $("exportBtn").onclick=exportBackup;$("importBackupBtn").onclick=()=>$("backupFile").click();$("replaceDbBtn").onclick=()=>{$("dbFile").click();closeModal()};
-}
-async function exportBackup(){
- const out={app:"JCITracerLocalV03",exported:new Date().toISOString(),masterInfo:{databaseVersion:master?.databaseVersion||null},reviews:await idbAll("reviews"),staff:await idbAll("staff"),sessions:await idbAll("sessions"),pins:(await idbGet("kv","pins"))?.value||[]};
- const blob=new Blob([JSON.stringify(out,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`JCI_Tracer_Backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);toast("Backup exported")
-}
-$("backupFile").onchange=async e=>{
- const f=e.target.files[0];if(!f)return;
- try{
-   const obj=JSON.parse(await f.text());if(obj.app!=="JCITracerLocalV03")throw new Error("Invalid backup");
-   await idbClear("reviews");await idbClear("staff");await idbClear("sessions");
-   for(const x of obj.reviews||[])await idbPut("reviews",x);for(const x of obj.staff||[])await idbPut("staff",x);for(const x of obj.sessions||[])await idbAdd("sessions",x);await idbPut("kv",{key:"pins",value:obj.pins||[]});
-   closeModal();toast("Backup restored");await renderStaffStats();
- }catch(err){alert("Invalid backup file.");}
- e.target.value="";
-};
-
+function openModal(title,body,isHtml=false){$('modalTitle').textContent=title;$('modalBody').innerHTML=isHtml?body:escapeHtml(body).replace(/\n/g,'<br>');$('modal').classList.remove('hidden')}function closeModal(){$('modal').classList.add('hidden')}$('modalClose').onclick=closeModal;$('modal').onclick=e=>{if(e.target.id==='modal')closeModal()};
+document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('dataBtn').onclick=openData;document.querySelectorAll('[data-mainnav]').forEach(b=>b.onclick=()=>{const n=b.dataset.mainnav;if(!master)return show('setupScreen');if(n==='unit'){renderUnits();show('unitScreen')}if(n==='bank'){renderUnits();show('bankUnitScreen')}if(n==='saved'){renderUnits();show('savedUnitScreen')}if(n==='review')openReviewHome();if(n==='data')openData()});
 init();

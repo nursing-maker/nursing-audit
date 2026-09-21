@@ -1,7 +1,7 @@
 {
   "name": "JCI Nursing Tracer",
   "short_name": "JCI Tracer",
-  "description": "Local-first tablet pilot for JCI nursing tracer question review and field use.",
+  "description": "Local-first tablet pilot for JCI nursing tracer sessions, bank browsing, saved sessions, review and results.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
