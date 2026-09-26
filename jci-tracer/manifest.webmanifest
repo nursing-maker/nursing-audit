@@ -1,7 +1,7 @@
 {
-  "name": "JCI Nursing Tracer",
+  "name": "JCI Nursing Tracer Workflow Pilot",
   "short_name": "JCI Tracer",
-  "description": "Local-first tablet pilot for JCI nursing tracer field use, question review, and source drill-down.",
+  "description": "Local-first JCI nursing interview and observation workflow pilot",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

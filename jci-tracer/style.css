@@ -16,3 +16,5 @@
 .reviewNotePreview{background:#f7f9fb;color:#526277}.rewritePreview{background:#fff4d8;color:#705000}
 .qrv.active{outline:3px solid #2f75b544;background:#eaf3fb}
 @media(max-width:720px){.jciRefRow{grid-template-columns:1fr}.jciRefCode{padding-top:0}}
+.activityGrid{margin-top:14px}.activity{min-height:145px}.pilotBanner,.pilotNote,.policyPending{border:1px solid #ead79e;background:#fff8df;color:#634f14;border-radius:14px;padding:12px 14px;line-height:1.45;margin-top:14px;font-size:12px}.pilotNote{margin-bottom:8px}.policyPending{font-size:11px;margin:8px 0 14px}.conditionalBadge{background:#fff1c8!important;color:#815d00!important}.modeGrid .mode{min-height:128px}.activityGrid .mode span{font-size:32px}.obsAreaBtn small{font-weight:600}.stats .stat b{overflow-wrap:anywhere;font-size:16px}
+@media(max-width:720px){.activityGrid{grid-template-columns:1fr!important}.modeGrid{grid-template-columns:1fr!important}.activity{min-height:110px}}
