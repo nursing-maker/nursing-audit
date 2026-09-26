@@ -1,7 +1,7 @@
 {
-  "name": "JCI Nursing Tracer Workflow Pilot",
+  "name": "JCI Nursing Tracer",
   "short_name": "JCI Tracer",
-  "description": "Local-first JCI nursing interview and observation workflow pilot",
+  "description": "Local-first nursing interview and observation rounds",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -1,290 +1,246 @@
-const DB_NAME="JCITracerLocalV03", DB_VERSION=3, APP_VERSION="0.5.1";
-const roleAllowed={SN:["SN"],CN:["SN","CN"],HN:["SN","CN","HN"]};
-let master=null;
-let state={
-  unit:null,role:null,mode:null,tags:[],tiers:["E1"],chapters:[],requestedCount:8,
-  staffId:"",session:[],index:0,responses:{},sourceType:"",sourceName:"",pendingStart:null,staffBackScreen:"interviewModeScreen",
-  bankUnit:null,bankRole:"SN",bankSelected:[],bankOrigin:"standalone",
-  savedUnit:null,savedRoleFilter:null,
-  resultUnit:null,obsResultUnit:null,
-  obsUnit:null,obsArea:null,obsSession:[],obsIndex:0,obsResponses:{}
-};
-const $=id=>document.getElementById(id), screens=[...document.querySelectorAll('.screen')];
+const DB_NAME = "JCITracerLocalV03";
+const DB_VERSION = 4;
+const APP_VERSION = "0.6.0";
+const DEFAULT_DB = "./JCI_Tracer_Workflow_Pilot_DB_v0_7.json";
+const roleAllowed = { SN: ["SN"], CN: ["SN", "CN"], HN: ["SN", "CN", "HN"] };
+const modeLabels = { quick: "General Round", general: "Core Questions", situation: "Patient / Situation", chapter: "By Chapter", manual: "Manual Session", saved: "Saved Session" };
+const interviewResults = ["Understood", "Partial", "Not Understood", "Not Asked"];
+const observationResults = ["Compliant", "Partial", "Non-Compliant", "N/A"];
 
-function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,DB_VERSION);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv',{keyPath:'key'});if(!db.objectStoreNames.contains('reviews'))db.createObjectStore('reviews',{keyPath:'key'});if(!db.objectStoreNames.contains('staff'))db.createObjectStore('staff',{keyPath:'id'});if(!db.objectStoreNames.contains('sessions'))db.createObjectStore('sessions',{keyPath:'id',autoIncrement:true});if(!db.objectStoreNames.contains('templates'))db.createObjectStore('templates',{keyPath:'id',autoIncrement:true});if(!db.objectStoreNames.contains('observations'))db.createObjectStore('observations',{keyPath:'id',autoIncrement:true});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-async function idbGet(store,key){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readonly'),r=tx.objectStore(store).get(key);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function idbPut(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(obj);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
-async function idbAdd(store,obj){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite'),r=tx.objectStore(store).add(obj);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function idbDelete(store,key){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
-async function idbAll(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readonly'),r=tx.objectStore(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-async function idbClear(store){const db=await openIDB();return new Promise((res,rej)=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).clear();tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
+let master = null;
+let currentScreen = "setupScreen";
+let routeStack = [];
+let noteTimer = null;
+let busy = false;
+let state = freshState();
 
-function show(id){screens.forEach(s=>s.classList.remove('active'));$(id).classList.add('active');window.scrollTo({top:0,behavior:'smooth'})}
-function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-function unitName(id){return master?.units?.find(x=>x.id===id)?.name||id}
-function roleName(r){return r==='SN'?'Staff Nurse':r==='CN'?'Charge Nurse':'Head Nurse'}
-function roleFor(q,u=state.unit){return q.roleByUnit?.[u]||''}
-function eligibleRole(q,unit,role){return q.units?.includes(unit)&&roleAllowed[role]?.includes(roleFor(q,unit))}
-function qById(id){return master?.questions?.find(q=>q.id===id)}
-function obsByKey(key){return master?.observation?.items?.find(x=>x.key===key)}
-function toast(msg){$('toast').textContent=msg;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),1700)}
-function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
-function takePrioritized(pool,n,asked){const fresh=shuffle(pool.filter(q=>!asked.has(q.id))),old=shuffle(pool.filter(q=>asked.has(q.id)));return [...fresh,...old].slice(0,n)}
-// The service menu and interview tags are distinct layers. Keep this alias narrow;
-// legacy generic tags must not turn unrelated questions into situation questions.
-function questionPatientTags(q){return q.patientTags||[]}
-function matchesSituation(q,tag){return questionPatientTags(q).includes(tag)||(tag==='Hemodialysis'&&questionPatientTags(q).includes('Dialysis'))}
-function interviewSituationTags(unit,role){
-  const candidates=master?.patientTagsByUnit?.[unit]||[];
-  return candidates.filter(tag=>master.questions.some(q=>eligibleRole(q,unit,role)&&matchesSituation(q,tag)))
-}
-function observationItems(unit){return (master?.observation?.items||[]).filter(x=>x.unit===unit)}
-function unitReviewKey(unit,qid){return `UNIT|${unit}|${qid}`}
-async function getReview(key){return await idbGet('reviews',key)}
-async function getStaff(id=state.staffId){if(!id)return null;return (await idbGet('staff',id))||{id,asked:[]}}
-function askedSet(staff){return new Set((staff?.asked||[]).map(x=>x.qid))}
-async function markAsked(q,result){if(!state.staffId||!q||result==='Not Asked'||!result)return;let s=await getStaff();if(!s.asked.some(x=>x.qid===q.id))s.asked.push({qid:q.id,unit:state.unit,role:state.role,date:new Date().toISOString()});await idbPut('staff',s)}
-
-async function init(){
-  const m=await idbGet('kv','master');master=m?.value||null;
-  if('serviceWorker' in navigator){try{const reg=await navigator.serviceWorker.register('./service-worker.js');reg.update()}catch(e){}}
-  try{if(navigator.storage?.persist)await navigator.storage.persist()}catch(e){}
-  if(master){renderAllUnitGrids();show('homeScreen')}else{renderDbStatus();show('setupScreen')}
-}
-function renderDbStatus(){
-  if(!master){$('dbStatus').innerHTML='<b>No pilot database imported yet.</b><br>Choose JCI_Tracer_Workflow_Pilot_DB_v0_6_1.json.';return}
-  const obsCount=master.observation?.items?.length||0;
-  $('dbStatus').innerHTML=`<b>Database ready</b><br>${escapeHtml(master.databaseVersion)}<br>${master.questionCount} interview questions • ${obsCount} operational observation rows<br><span class="micro">Policy verification: ${escapeHtml(master.policyVerificationStatus||'pending')}</span>`
-}
-$('importDbBtn').onclick=()=>$('dbFile').click();
-$('dbFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!obj.questions||!obj.units||!obj.observation)throw new Error('missing workflow data');master=obj;await idbPut('kv',{key:'master',value:obj,imported:new Date().toISOString()});renderDbStatus();renderAllUnitGrids();show('homeScreen');toast('Workflow pilot database imported')}catch(err){alert('Invalid workflow-pilot database file. Please use the supplied v0.6 JSON.')}e.target.value=''};
-
-function unitButtons(target,handler,kind='interview'){
-  $(target).innerHTML=master.units.map(u=>{
-    const s=master.unitSummary?.[u.id]||{};
-    let small='';
-    if(kind==='interview')small=`${s.cleanInterviewBank??master.questions.filter(q=>q.units.includes(u.id)).length} scope-clean bank questions`;
-    if(kind==='observation')small=s.observationChecks?`${s.observationChecks} checks • ${s.observationAreas||0} areas`:'No dedicated observation baseline';
-    return `<button class="choice unitBtn" data-unit="${u.id}">${escapeHtml(u.name)}<small>${small}</small></button>`
-  }).join('');
-  document.querySelectorAll(`#${target} .unitBtn`).forEach(b=>b.onclick=()=>handler(b.dataset.unit))
-}
-function renderAllUnitGrids(){
-  unitButtons('interviewUnitGrid',selectInterviewUnit,'interview');
-  unitButtons('observationUnitGrid',selectObservationUnit,'observation');
-  unitButtons('bankUnitGrid',selectBankUnit,'interview');
-  unitButtons('savedUnitGrid',openSavedUnit,'interview');
-  unitButtons('unitResultsUnitGrid',openUnitResults,'interview');
-  unitButtons('obsResultsUnitGrid',openObsResults,'observation');
-}
-
-// HOME
-$('startInterview').onclick=()=>{renderAllUnitGrids();show('interviewUnitScreen')};
-$('startObservation').onclick=()=>{renderAllUnitGrids();show('observationUnitScreen')};
-
-// INTERVIEW UNIT / ROLE / MODE
-function selectInterviewUnit(u){state.unit=u;state.role=null;state.mode=null;state.tags=[];state.chapters=[];state.tiers=['E1'];document.querySelectorAll('.interviewRole').forEach(b=>b.classList.remove('selected'));$('interviewRoleHeading').textContent=`${unitName(u)} — Choose Role`;show('interviewRoleScreen')}
-document.querySelectorAll('.interviewRole').forEach(b=>b.onclick=()=>{state.role=b.dataset.role;document.querySelectorAll('.interviewRole').forEach(x=>x.classList.toggle('selected',x===b))});
-$('roleContinue').onclick=()=>{if(!state.role)return alert('Choose a role.');$('interviewContext').textContent=`${unitName(state.unit)} • ${roleName(state.role)}`;show('interviewModeScreen')};
-document.querySelectorAll('.interviewMode').forEach(b=>b.onclick=()=>chooseInterviewMode(b.dataset.mode));
-
-async function chooseInterviewMode(mode){
-  state.mode=mode;state.tags=[];state.chapters=[];state.tiers=['E1'];
-  if(mode==='saved'){state.savedUnit=state.unit;state.savedRoleFilter=state.role;await renderSavedList();show('savedScreen');return}
-  if(mode==='manual'){openBank(state.unit,state.role,'interview');return}
-  $('quickBuilder').classList.toggle('hidden',mode!=='quick');
-  $('generalBuilder').classList.toggle('hidden',mode!=='general');
-  $('situationBuilder').classList.toggle('hidden',mode!=='situation');
-  $('chapterBuilder').classList.toggle('hidden',mode!=='chapter');
-  document.querySelectorAll('.tier').forEach(x=>x.classList.toggle('selected',x.dataset.tier==='E1'));
-  const titles={quick:'Quick Balanced',general:'General Core',situation:'Situation-Driven',chapter:'By Chapter'};
-  const helps={
-    quick:'Choose session size. Optionally add a real patient/device situation; the pilot will mix General Core, unit questions and that situation.',
-    general:'Choose General Core tiers. These are common survey-preparation questions, not a separate JCI chapter.',
-    situation:'Choose one or more situations/devices that are actually present. Only unit-allowed options are shown.',
-    chapter:'Choose one or more JCI chapters for a focused interview.'
+function freshState() {
+  return {
+    unit: null, role: null, mode: null, tags: [], chapters: [], requestedCount: 8,
+    staffId: "", session: [], responses: {}, pendingStart: null, sourceType: "", sourceName: "",
+    bankSelected: [], bankOrigin: "flow", savedRoleFilter: null, lastInterview: null,
+    obsUnit: null, obsArea: null, obsRound: null, lastRound: null,
   };
-  $('builderTitle').textContent=titles[mode];$('builderHelp').textContent=helps[mode];
-  renderBuilderSelectors();await updateMatchSummary();show('builderScreen')
-}
-function renderBuilderSelectors(){
-  const tags=interviewSituationTags(state.unit,state.role);
-  for(const target of ['tagGrid','quickTagGrid']){
-    $(target).innerHTML=tags.length?tags.map(t=>`<button class="chip builderTag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join(''):'<div class="muted">No controlled situation options for this unit.</div>'
-  }
-  document.querySelectorAll('.builderTag').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');const t=b.dataset.tag;state.tags=b.classList.contains('selected')?[...new Set([...state.tags,t])]:state.tags.filter(x=>x!==t);document.querySelectorAll('.builderTag').forEach(x=>{if(x.dataset.tag===t)x.classList.toggle('selected',state.tags.includes(t))});await updateMatchSummary()});
-  $('chapterGrid').innerHTML=master.chapters.map(c=>`<button class="chip chapter" data-chapter="${c}">${c}</button>`).join('');
-  document.querySelectorAll('.chapter').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');state.chapters=b.classList.contains('selected')?[...new Set([...state.chapters,b.dataset.chapter])]:state.chapters.filter(x=>x!==b.dataset.chapter);await updateMatchSummary()})
-}
-document.querySelectorAll('.tier').forEach(b=>b.onclick=async()=>{b.classList.toggle('selected');state.tiers=b.classList.contains('selected')?[...new Set([...state.tiers,b.dataset.tier])]:state.tiers.filter(x=>x!==b.dataset.tier);await updateMatchSummary()});
-$('questionCount').onchange=async()=>{$('customCount').classList.toggle('hidden',$('questionCount').value!=='custom');await updateMatchSummary()};
-$('customCount').oninput=updateMatchSummary;$('hideNotRelevant').onchange=updateMatchSummary;
-function requestedCount(){const v=$('questionCount').value;if(v==='all')return 'all';if(v==='custom')return Math.max(1,Math.min(100,Number($('customCount').value||1)));return Number(v)}
-async function reviewedNotRelevantIds(unit){const reviews=await idbAll('reviews');return new Set(reviews.filter(r=>r.key?.startsWith(`UNIT|${unit}|`)&&r.status==='Not Relevant').map(r=>r.key.split('|')[2]))}
-async function generatedPool(){
-  let p=master.questions.filter(q=>eligibleRole(q,state.unit,state.role));
-  if($('hideNotRelevant').checked){const bad=await reviewedNotRelevantIds(state.unit);p=p.filter(q=>!bad.has(q.id))}
-  if(state.mode==='general')p=p.filter(q=>q.generalCore&&state.tiers.includes(q.generalCore.tier));
-  if(state.mode==='situation')p=p.filter(q=>state.tags.some(t=>matchesSituation(q,t)));
-  if(state.mode==='chapter')p=p.filter(q=>state.chapters.includes(q.chapter));
-  return p
-}
-async function updateMatchSummary(){
-  if(state.mode==='situation'&&!state.tags.length){$('matchSummary').innerHTML=interviewSituationTags(state.unit,state.role).length?'Select at least one patient/situation.':'No interview questions are tagged for this unit and role yet. Use General Core, Chapter, or Manual Session.';return}
-  if(state.mode==='chapter'&&!state.chapters.length){$('matchSummary').innerHTML='Select at least one chapter.';return}
-  const p=await generatedPool(),req=requestedCount();
-  if(state.mode==='quick'){
-    const gen=p.filter(q=>q.generalCore).length,conditional=p.filter(q=>q.scopeStatusByUnit?.[state.unit]?.status==='CONDITIONAL').length;
-    $('matchSummary').innerHTML=`<b>${p.length}</b> eligible questions in the clean bank • <b>${gen}</b> General Core candidates • <b>${conditional}</b> conditional/situation items.<br><span class="micro">The actual ${req==='all'?'matching':req} questions are generated only after Staff ID is entered.</span>`;
-  }else $('matchSummary').innerHTML=`<b>${p.length}</b> matching questions. Requested: <b>${req==='all'?'all':req}</b>.<br><span class="micro">Final selection happens after Staff ID so repeat-prioritization can work.</span>`
-}
-$('builderContinue').onclick=async()=>{
-  if(state.mode==='situation'&&!state.tags.length)return alert('Choose at least one patient/situation.');
-  if(state.mode==='chapter'&&!state.chapters.length)return alert('Choose at least one chapter.');
-  const pool=await generatedPool();if(!pool.length)return alert('No matching questions.');
-  state.requestedCount=requestedCount();state.pendingStart={kind:'generated'};state.staffBackScreen='builderScreen';prepareStaffConfirm();
-};
-
-// STAFF ID LAST
-function pendingDescription(){
-  if(!state.pendingStart)return '';
-  if(state.pendingStart.kind==='template')return `Saved Session: ${state.pendingStart.template.name} • ${state.pendingStart.template.qids.length} questions`;
-  if(state.pendingStart.kind==='manual')return `Manual Session • ${state.bankSelected.length} selected questions`;
-  const n=state.requestedCount==='all'?'All matching':`${state.requestedCount} questions`;
-  const extra=state.tags.length?` • ${state.tags.join(' / ')}`:state.chapters.length?` • ${state.chapters.join(', ')}`:'';
-  return `${state.mode==='quick'?'Quick Balanced':state.mode==='general'?'General Core':state.mode==='situation'?'Situation-Driven':'By Chapter'} • ${n}${extra}`
-}
-function prepareStaffConfirm(){state.staffId='';$('staffConfirmId').value='';$('staffConfirmStats').classList.add('hidden');$('staffConfirmContext').innerHTML=`<b>${escapeHtml(unitName(state.unit))}</b> • ${escapeHtml(roleName(state.role))}<br>${escapeHtml(pendingDescription())}`;show('staffConfirmScreen')}
-$('staffConfirmBack').onclick=()=>show(state.staffBackScreen||'interviewModeScreen');
-$('staffConfirmId').oninput=renderStaffConfirmStats;
-async function renderStaffConfirmStats(){const id=$('staffConfirmId').value.trim();if(!id){$('staffConfirmStats').classList.add('hidden');return}const s=await getStaff(id),asked=askedSet(s);let exact=[];if(state.pendingStart?.kind==='template')exact=state.pendingStart.template.qids;else if(state.pendingStart?.kind==='manual')exact=[...state.bankSelected];const repeated=exact.filter(x=>asked.has(x)).length;$('staffConfirmStats').innerHTML=`<div class="stat"><b>${asked.size}</b><span>Previously asked overall</span></div><div class="stat"><b>${repeated}</b><span>Repeated in exact set</span></div><div class="stat"><b>${unitName(state.unit)}</b><span>Current unit</span></div>`;$('staffConfirmStats').classList.remove('hidden')}
-$('staffConfirmStart').onclick=async()=>{const id=$('staffConfirmId').value.trim();if(!id)return alert('Enter Staff ID.');state.staffId=id;await startPendingInterview()};
-async function startPendingInterview(){
-  const s=await getStaff(),asked=askedSet(s);
-  let chosen=[];
-  if(state.pendingStart?.kind==='template'){
-    const t=state.pendingStart.template;chosen=t.qids.map(qById).filter(q=>q&&eligibleRole(q,t.unit,t.role));const repeats=chosen.filter(q=>asked.has(q.id)).length;if(repeats&&!confirm(`${repeats} of ${chosen.length} questions were previously asked to this Staff ID. Start this exact Saved Session anyway?`))return;state.sourceType='Saved';state.sourceName=t.name;
-  }else if(state.pendingStart?.kind==='manual'){
-    chosen=state.bankSelected.map(qById).filter(Boolean);const repeats=chosen.filter(q=>asked.has(q.id)).length;if(repeats&&!confirm(`${repeats} of ${chosen.length} selected questions were previously asked to this Staff ID. Start anyway?`))return;state.sourceType='Manual';state.sourceName='Manual Session';
-  }else{
-    const pool=await generatedPool();const req=state.requestedCount==='all'?pool.length:Math.min(state.requestedCount,pool.length);chosen=state.mode==='quick'?buildQuickBalanced(pool,req,asked):takePrioritized(pool,req,$('avoidAsked').checked?asked:new Set());state.sourceType='Generated';state.sourceName=state.mode==='quick'?'Quick Balanced':state.mode==='general'?'General Core':state.mode==='situation'?'Situation-Driven':'By Chapter';
-  }
-  if(!chosen.length)return alert('No questions available for this session.');
-  state.session=chosen;state.index=0;state.responses={};show('questionScreen');await renderQuestion()
-}
-function buildQuickBalanced(pool,n,asked){
-  const avoid=$('avoidAsked').checked?asked:new Set();const selected=[];const seen=new Set();const add=(arr,k)=>{for(const q of takePrioritized(arr,k,avoid)){if(!seen.has(q.id)){seen.add(q.id);selected.push(q)}}};
-  const situation=state.tags.length?pool.filter(q=>state.tags.some(t=>matchesSituation(q,t))):[];
-  const general=pool.filter(q=>q.generalCore);
-  const routine=pool.filter(q=>!q.generalCore&&q.scopeStatusByUnit?.[state.unit]?.status==='ACTIVE'&&!questionPatientTags(q).length);
-  const situationN=state.tags.length?Math.max(1,Math.round(n*.25)):0;
-  const generalN=Math.max(1,Math.round(n*.4));
-  add(situation,situationN);add(general,Math.min(generalN,n-selected.length));add(routine,n-selected.length);
-  add(pool,n-selected.length);return selected.slice(0,n)
 }
 
-// BANK + MANUAL + SAVED TEMPLATE CREATION
-function selectBankUnit(u){state.bankUnit=u;state.bankSelected=[];state.bankOrigin='standalone';$('bankRoleHeading').textContent=`${unitName(u)} — Choose Role`;show('bankRoleScreen')}
-document.querySelectorAll('.bankRoleChoice').forEach(b=>b.onclick=()=>openBank(state.bankUnit,b.dataset.role,'standalone'));
-function openBank(unit,role,origin='standalone'){
-  state.bankUnit=unit;state.bankRole=role;state.bankOrigin=origin;state.bankSelected=[];
-  $('bankRole').value=role;$('bankType').value='ALL';$('bankSearch').value='';$('bankChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');
-  $('bankHeading').textContent=`${unitName(unit)} — Interview Bank`;$('bankRole').disabled=origin==='interview';$('bankChange').textContent=origin==='interview'?'Back to Modes':'Change Unit';renderBank();show('bankScreen')
+const $ = id => document.getElementById(id);
+const screens = [...document.querySelectorAll(".screen")];
+const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+const now = () => new Date().toISOString();
+const uid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      const stores = [
+        ["kv", { keyPath: "key" }], ["reviews", { keyPath: "key" }], ["staff", { keyPath: "id" }],
+        ["sessions", { keyPath: "id", autoIncrement: true }], ["templates", { keyPath: "id", autoIncrement: true }],
+        ["observations", { keyPath: "id", autoIncrement: true }], ["rounds", { keyPath: "id" }],
+      ];
+      for (const [name, options] of stores) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, options);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
-$('bankChange').onclick=()=>{if(state.bankOrigin==='interview')show('interviewModeScreen');else show('bankUnitScreen')};
-$('bankRole').onchange=()=>{state.bankRole=$('bankRole').value;state.bankSelected=[];renderBank()};$('bankType').onchange=renderBank;$('bankChapter').onchange=renderBank;$('bankSearch').oninput=renderBank;
-function renderBank(){
-  let p=master.questions.filter(q=>eligibleRole(q,state.bankUnit,state.bankRole));const type=$('bankType').value,ch=$('bankChapter').value,s=$('bankSearch').value.trim().toLowerCase();if(type!=='ALL')p=p.filter(q=>q.typeByUnit?.[state.bankUnit]===type);if(ch!=='ALL')p=p.filter(q=>q.chapter===ch);if(s)p=p.filter(q=>[q.question,q.standard,q.me,q.chapter,(q.tags||[]).join(' '),(q.patientTags||[]).join(' '),q.generalCore?.topic||''].join(' ').toLowerCase().includes(s));
-  $('bankCount').textContent=`${p.length} matching • ${master.questions.filter(q=>eligibleRole(q,state.bankUnit,state.bankRole)).length} total for ${roleName(state.bankRole)}`;$('selectedCount').textContent=`${state.bankSelected.length} selected`;
-  let last='',html='';for(const q of p){if(q.chapter!==last){last=q.chapter;html+=`<div class="chapterHeader">${escapeHtml(last)}</div>`}const checked=state.bankSelected.includes(q.id)?'checked':'';const st=q.scopeStatusByUnit?.[state.bankUnit]?.status||'ACTIVE';html+=`<div class="bankRow"><input type="checkbox" class="bankCheck" data-qid="${q.id}" ${checked}><div><div class="bankQ">${escapeHtml(q.question)}</div><div class="miniBadges"><span class="miniBadge">${escapeHtml(roleFor(q,state.bankUnit))}</span><span class="miniBadge">${escapeHtml(q.typeByUnit?.[state.bankUnit]||'')}</span><span class="miniBadge">${escapeHtml(st)}</span>${q.generalCore?`<span class="miniBadge">${q.generalCore.tier} General</span>`:''}</div></div><button class="detailsBtn secondary" data-detail="${q.id}">Details</button></div>`}
-  $('bankList').innerHTML=html||'<div class="muted">No matching questions.</div>';
-  document.querySelectorAll('.bankCheck').forEach(chk=>chk.onchange=()=>{const id=chk.dataset.qid;if(chk.checked){if(!state.bankSelected.includes(id))state.bankSelected.push(id)}else state.bankSelected=state.bankSelected.filter(x=>x!==id);$('selectedCount').textContent=`${state.bankSelected.length} selected`});document.querySelectorAll('[data-detail]').forEach(b=>b.onclick=()=>openQuestionDetails(b.dataset.detail,state.bankUnit))
+async function idbGet(store, key) { const db = await openIDB(); return new Promise((res, rej) => { const r = db.transaction(store, "readonly").objectStore(store).get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbPut(store, value) { const db = await openIDB(); return new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value); tx.oncomplete = () => res(value); tx.onerror = () => rej(tx.error); }); }
+async function idbAdd(store, value) { const db = await openIDB(); return new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); const r = tx.objectStore(store).add(value); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbAll(store) { const db = await openIDB(); return new Promise((res, rej) => { const r = db.transaction(store, "readonly").objectStore(store).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbClear(store) { const db = await openIDB(); return new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).clear(); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
+
+function show(id, options = {}) {
+  if (!$(id)) return;
+  if (!options.replace && currentScreen !== id) routeStack.push(currentScreen);
+  currentScreen = id;
+  screens.forEach(s => s.classList.toggle("active", s.id === id));
+  $("headerBack").classList.toggle("hidden", ["homeScreen", "setupScreen"].includes(id));
+  if (!options.replace) history.pushState({ screen: id }, "");
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
-$('reviewSelection').onclick=()=>{if(!state.bankSelected.length)return alert('Select at least one question.');renderSelection();show('selectionScreen')};
-function renderSelection(){$('selectionList').innerHTML=state.bankSelected.map((id,i)=>{const q=qById(id);return `<div class="selectRow"><span class="selectNum">${i+1}</span><div><b>${escapeHtml(q?.chapter||'')}</b><div class="bankQ">${escapeHtml(q?.question||id)}</div></div><button class="orderBtn secondary" data-up="${i}">↑</button><button class="orderBtn secondary" data-down="${i}">↓</button><button class="orderBtn secondary" data-remove="${i}">×</button></div>`}).join('');document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>moveSelected(Number(b.dataset.up),-1));document.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>moveSelected(Number(b.dataset.down),1));document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{state.bankSelected.splice(Number(b.dataset.remove),1);renderSelection()})}
-function moveSelected(i,d){const j=i+d;if(j<0||j>=state.bankSelected.length)return;[state.bankSelected[i],state.bankSelected[j]]=[state.bankSelected[j],state.bankSelected[i]];renderSelection()}
-async function saveCurrentTemplate(){const name=(prompt('Name this Saved Session:')||'').trim();if(!name)return null;const id=await idbAdd('templates',{name,unit:state.bankUnit,role:state.bankRole,qids:[...state.bankSelected],created:new Date().toISOString(),updated:new Date().toISOString()});toast('Saved Session created');return await idbGet('templates',id)}
-$('startManual').onclick=()=>{state.unit=state.bankUnit;state.role=state.bankRole;state.pendingStart={kind:'manual'};state.staffBackScreen='selectionScreen';prepareStaffConfirm()};
-$('saveAndStart').onclick=async()=>{const t=await saveCurrentTemplate();if(!t)return;state.unit=t.unit;state.role=t.role;state.pendingStart={kind:'template',template:t};state.staffBackScreen='selectionScreen';prepareStaffConfirm()};
-$('saveTemplate').onclick=async()=>{const t=await saveCurrentTemplate();if(t){state.savedUnit=t.unit;state.savedRoleFilter=null;await renderSavedList();show('savedScreen')}};
-function openQuestionDetails(qid,unit){const q=qById(qid);if(!q)return;const refs=(q.sourceRefs||[]).map(r=>`<div class="sourceBlock"><b>${escapeHtml(r.standard||'')} ${escapeHtml(r.me||'')}</b><br>${escapeHtml(r.meText||'').replace(/\n/g,'<br>')}<div class="micro">JCI Manual page ${escapeHtml(r.page||'—')}</div></div>`).join('');openModal('Question Details',`<div class="sourceBlock"><b>Question</b><br>${escapeHtml(q.question).replace(/\n/g,'<br>')}</div><div class="sourceBlock"><b>Unit status</b><br>${escapeHtml(q.scopeStatusByUnit?.[unit]?.status||'')}</div><div class="sourceBlock"><b>Standard / ME</b><br>${escapeHtml(q.standard||'')} • ${escapeHtml(q.me||'')}</div><div class="sourceBlock"><b>JCI Expected</b><br>${escapeHtml(q.expected||'—').replace(/\n/g,'<br>')}</div>${refs}`,true)}
+function goBack() { const previous = routeStack.pop(); if (previous && $(previous)) show(previous, { replace: true }); else show("homeScreen", { replace: true }); }
+function goHome() { routeStack = []; show("homeScreen", { replace: true }); }
+function toast(message) { $("toast").textContent = message; $("toast").classList.remove("hidden"); setTimeout(() => $("toast").classList.add("hidden"), 1800); }
+async function guarded(fn) { if (busy) return; busy = true; try { await fn(); } finally { setTimeout(() => { busy = false; }, 250); } }
 
-// SAVED SESSIONS
-async function openSavedUnit(u){state.savedUnit=u;state.savedRoleFilter=null;await renderSavedList();show('savedScreen')}
-$('savedChangeUnit').onclick=()=>{state.savedRoleFilter=null;show('savedUnitScreen')};
-async function renderSavedList(){
-  $('savedHeading').textContent=`${unitName(state.savedUnit)} — Saved Sessions`;let t=(await idbAll('templates')).filter(x=>x.unit===state.savedUnit);if(state.savedRoleFilter)t=t.filter(x=>x.role===state.savedRoleFilter);t.sort((a,b)=>new Date(b.updated)-new Date(a.updated));$('savedCount').textContent=`${t.length} saved session${t.length===1?'':'s'}`;$('savedFilterNote').textContent=state.savedRoleFilter?`Interview flow filter: ${roleName(state.savedRoleFilter)}. Choose Start and Staff ID will be the final step.`:'Templates can be started, edited, duplicated or deleted.';
-  $('savedList').innerHTML=t.length?t.map(x=>`<div class="savedCard"><div class="savedTitle">${escapeHtml(x.name)}</div><div class="savedMeta">${roleName(x.role)} • ${x.qids.length} questions • ${new Date(x.updated).toLocaleDateString()}</div><div class="savedActions"><button class="primary" data-starttemplate="${x.id}">Start</button><button class="secondary" data-edittemplate="${x.id}">Edit</button><button class="secondary" data-duptemplate="${x.id}">Duplicate</button><button class="secondary" data-deltemplate="${x.id}">Delete</button></div></div>`).join(''):'<div class="muted">No saved sessions here yet. Build one from Bank.</div>';
-  document.querySelectorAll('[data-starttemplate]').forEach(b=>b.onclick=()=>prepareTemplateStart(Number(b.dataset.starttemplate)));document.querySelectorAll('[data-edittemplate]').forEach(b=>b.onclick=()=>editTemplate(Number(b.dataset.edittemplate)));document.querySelectorAll('[data-duptemplate]').forEach(b=>b.onclick=()=>duplicateTemplate(Number(b.dataset.duptemplate)));document.querySelectorAll('[data-deltemplate]').forEach(b=>b.onclick=()=>deleteTemplate(Number(b.dataset.deltemplate)))
+function unit(id) { return master?.units?.find(x => x.id === id); }
+function unitName(id) { return unit(id)?.name || id || ""; }
+function roleName(role) { return role === "SN" ? "Staff Nurse" : role === "CN" ? "Charge Nurse" : "Head Nurse"; }
+function qById(id) { return master?.questions?.find(q => q.id === id); }
+function obsByKey(key) { return master?.observation?.items?.find(x => x.key === key); }
+function eligible(q, unitId, role) { return q.units?.includes(unitId) && roleAllowed[role]?.includes(q.roleByUnit?.[unitId]); }
+function statusFor(q, unitId) { return q.scopeStatusByUnit?.[unitId]?.status || ""; }
+function activeOrConditional(q, unitId) { return ["ACTIVE", "CONDITIONAL"].includes(statusFor(q, unitId)); }
+function questionTags(q) { return [...new Set([...(q.patientTags || []), ...(q.legacyPatientTags || [])])]; }
+function situationAliases(tag) { return tag === "Hemodialysis" ? ["Hemodialysis", "Dialysis"] : [tag]; }
+function matchesSituation(q, tag) { return situationAliases(tag).some(t => questionTags(q).includes(t)); }
+function shuffle(items) { const a = [...items]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+async function loadMaster() {
+  const saved = await idbGet("kv", "master");
+  if (saved?.value?.schemaVersion >= 7) return saved.value;
+  try {
+    const response = await fetch(DEFAULT_DB, { cache: "no-store" });
+    if (!response.ok) throw new Error("database unavailable");
+    const bundled = await response.json();
+    if (!bundled.questions || !bundled.observation || bundled.schemaVersion < 7) throw new Error("invalid database");
+    await idbPut("kv", { key: "master", value: bundled, imported: now(), migration: "v0.6.1-to-v0.7-preserve-local-stores" });
+    return bundled;
+  } catch (_) { return saved?.value || null; }
 }
-async function prepareTemplateStart(id){const t=await idbGet('templates',id);if(!t)return;state.unit=t.unit;state.role=t.role;state.pendingStart={kind:'template',template:t};state.staffBackScreen='savedScreen';prepareStaffConfirm()}
-async function editTemplate(id){const t=await idbGet('templates',id);if(!t)return;state.bankUnit=t.unit;state.bankRole=t.role;state.bankSelected=[...t.qids];state.bankOrigin='standalone';$('bankRole').disabled=false;$('bankRole').value=t.role;$('bankType').value='ALL';$('bankSearch').value='';$('bankChapter').innerHTML='<option value="ALL">All Chapters</option>'+master.chapters.map(c=>`<option value="${c}">${c}</option>`).join('');$('bankHeading').textContent=`${unitName(t.unit)} — Interview Bank`;renderBank();show('bankScreen');toast('Template loaded into Bank selection')}
-async function duplicateTemplate(id){const t=await idbGet('templates',id);if(!t)return;const name=(prompt('Name the duplicate:',`${t.name} Copy`)||'').trim();if(!name)return;const copy={...t,name,created:new Date().toISOString(),updated:new Date().toISOString()};delete copy.id;await idbAdd('templates',copy);await renderSavedList();toast('Duplicated')}
-async function deleteTemplate(id){const t=await idbGet('templates',id);if(!t||!confirm(`Delete Saved Session "${t.name}"?`))return;await idbDelete('templates',id);await renderSavedList()}
-
-// INTERVIEW RUN
-function currentQ(){return state.session[state.index]}
-async function renderQuestion(){const q=currentQ();if(!q)return finishSession();const s=await getStaff(),asked=askedSet(s),pins=new Set((await idbGet('kv','pins'))?.value||[]),resp=state.responses[q.id]||{};let badges=[];if(q.generalCore)badges.push(`<span class="badge ${q.generalCore.tier.toLowerCase()}">${q.generalCore.tier} • ${escapeHtml(q.generalCore.topic)}</span>`);badges.push(`<span class="badge">${q.chapter}</span><span class="badge">${escapeHtml(roleFor(q,state.unit))}</span>`);const ss=q.scopeStatusByUnit?.[state.unit]?.status;if(ss==='CONDITIONAL')badges.push('<span class="badge conditionalBadge">Conditional</span>');if(asked.has(q.id))badges.push('<span class="badge">Previously asked</span>');$('questionBadges').innerHTML=badges.join('');$('questionContext').textContent=`${unitName(state.unit)} • Staff ${state.staffId} • ${state.sourceName} • ${state.index+1}/${state.session.length}`;$('progressFill').style.width=((state.index+1)/state.session.length*100)+'%';$('questionText').textContent=q.question;$('staffResultCurrent').textContent=resp.result||'Not scored';$('staffNote').value=resp.note||'';document.querySelectorAll('.resultButtons [data-result]').forEach(b=>b.classList.toggle('active',resp.result===b.dataset.result));$('pinBtn').textContent=pins.has(`${state.unit}|${q.id}`)?'★ Pinned':'☆ Pin';const ur=await getReview(unitReviewKey(state.unit,q.id));$('questionIssueSummary').textContent=ur?.status?`Flag: ${ur.status}`:'No local flag'}
-document.querySelectorAll('.resultButtons [data-result]').forEach(b=>b.onclick=()=>{$('staffResultCurrent').textContent=b.dataset.result;document.querySelectorAll('.resultButtons [data-result]').forEach(x=>x.classList.toggle('active',x===b));state.responses[currentQ().id]={...(state.responses[currentQ().id]||{}),result:b.dataset.result,note:$('staffNote').value}});
-$('staffNote').oninput=()=>{const q=currentQ();if(q)state.responses[q.id]={...(state.responses[q.id]||{}),note:$('staffNote').value}};
-async function persistCurrentResponse(){const q=currentQ();if(!q)return;let r=state.responses[q.id]||{};r.note=$('staffNote').value;if(!r.result)r.result='Not Asked';state.responses[q.id]=r;await markAsked(q,r.result)}
-$('nextQuestion').onclick=async()=>{await persistCurrentResponse();state.index++;await renderQuestion()};$('skipQuestion').onclick=async()=>{const q=currentQ();state.responses[q.id]={result:'Not Asked',note:$('staffNote').value};state.index++;await renderQuestion()};$('prevQuestion').onclick=async()=>{await persistCurrentResponse();if(state.index>0)state.index--;await renderQuestion()};
-$('pinBtn').onclick=async()=>{const q=currentQ(),k=`${state.unit}|${q.id}`,row=await idbGet('kv','pins'),arr=row?.value||[],set=new Set(arr);set.has(k)?set.delete(k):set.add(k);await idbPut('kv',{key:'pins',value:[...set]});await renderQuestion()};
-document.querySelectorAll('[data-info]').forEach(b=>b.onclick=()=>{const q=currentQ();if(!q)return;const type=b.dataset.info;if(type==='expected')openModal('JCI Expected',q.expected||'—');if(type==='policy')openModal('Local Policy — Workflow Pilot',`PENDING FULL POLICY VERIFICATION\n\n${q.policy||'No local policy answer loaded.'}\n\nPolicy source/reference: ${q.policyRef||'—'}`);if(type==='standard')openModal('JCI Standard',(q.sourceRefs||[]).map(r=>`${r.standard}\n${r.standardStatement||''}\nPage ${r.page||'—'}`).join('\n\n')||q.standard||'—');if(type==='me')openModal('JCI Measureable Element',(q.sourceRefs||[]).map(r=>`${r.standard} ${r.me}\n${r.meText||''}\nPage ${r.page||'—'}`).join('\n\n')||q.me||'—')});
-$('questionIssueBtn').onclick=async()=>{const q=currentQ();if(!q)return;const old=await getReview(unitReviewKey(state.unit,q.id));const status=(prompt('Flag status: Needs Rewrite / Local Check / Hold / Not Relevant / Clear',old?.status||'Local Check')||'').trim();if(!status)return;const note=(prompt('Short note:',old?.note||'')||'').trim();if(status==='Clear')await idbDelete('reviews',unitReviewKey(state.unit,q.id));else await idbPut('reviews',{key:unitReviewKey(state.unit,q.id),status,note,updated:new Date().toISOString()});toast('Question flag saved');await renderQuestion()};
-async function finishSession(){await persistCurrentResponse();const responses=state.session.map(q=>({qid:q.id,result:state.responses[q.id]?.result||'Not Asked',note:state.responses[q.id]?.note||''}));const session={date:new Date().toISOString(),unit:state.unit,staffId:state.staffId,role:state.role,sourceType:state.sourceType,sourceName:state.sourceName,qids:state.session.map(q=>q.id),responses};await idbAdd('sessions',session);let c={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);$('sessionSummary').innerHTML=`<div class="listRow"><b>Unit</b><span>${escapeHtml(unitName(state.unit))}</span></div><div class="listRow"><b>Staff ID</b><span>${escapeHtml(state.staffId)}</span></div><div class="listRow"><b>Session</b><span>${escapeHtml(state.sourceName)}</span></div><div class="listRow"><b>Questions</b><span class="count">${responses.length}</span></div><div class="listRow"><b>Understood</b><span class="count">${c.Understood||0}</span></div><div class="listRow"><b>Partial</b><span class="count">${c.Partial||0}</span></div><div class="listRow"><b>Not Understood</b><span class="count">${c['Not Understood']||0}</span></div><div class="listRow"><b>Not Asked</b><span class="count">${c['Not Asked']||0}</span></div>`;show('summaryScreen')}
-$('sameStaffNewSelection').onclick=()=>{state.mode=null;state.pendingStart=null;$('interviewContext').textContent=`${unitName(state.unit)} • ${roleName(state.role)} • Staff ${state.staffId}`;show('interviewModeScreen')};$('anotherInterview').onclick=()=>{state.staffId='';state.pendingStart=null;renderAllUnitGrids();show('interviewUnitScreen')};
-
-// OBSERVATION
-function selectObservationUnit(u){state.obsUnit=u;state.obsArea=null;renderObservationAreas();show('observationAreaScreen')}
-$('obsChangeUnit').onclick=()=>show('observationUnitScreen');
-function renderObservationAreas(){
-  $('observationAreaHeading').textContent=`${unitName(state.obsUnit)} — Where are you now?`;const items=observationItems(state.obsUnit);const gap=master.observation?.sourceGapByUnit?.[state.obsUnit];
-  if(!items.length){$('obsSourceGap').classList.remove('hidden');$('obsSourceGap').innerHTML=`<b>Controlled source gap</b><br>${escapeHtml(gap?.reason||'No dedicated observation baseline exists for this operational profile in the current readiness workbook.')}<br><span class="micro">No checks were invented for this pilot.</span>`;$('observationAreaGrid').innerHTML='';return}
-  $('obsSourceGap').classList.add('hidden');const map=new Map();items.forEach(x=>(x.areas||[]).forEach(a=>{if(!map.has(a))map.set(a,new Set());map.get(a).add(x.key)}));const list=[...map.entries()].map(([area,keys])=>({area,count:keys.size})).sort((a,b)=>a.area.localeCompare(b.area));$('observationAreaGrid').innerHTML=list.map(x=>`<button class="choice obsAreaBtn" data-area="${escapeHtml(x.area)}">${escapeHtml(x.area)}<small>${x.count} checks</small></button>`).join('');document.querySelectorAll('.obsAreaBtn').forEach(b=>b.onclick=()=>startObservationArea(b.dataset.area))
+async function init() {
+  master = await loadMaster();
+  if ("serviceWorker" in navigator) try { const reg = await navigator.serviceWorker.register("./service-worker.js"); reg.update(); } catch (_) {}
+  try { if (navigator.storage?.persist) await navigator.storage.persist(); } catch (_) {}
+  if (!master) { renderDbStatus(); show("setupScreen", { replace: true }); return; }
+  $("bankChapter").innerHTML = `<option value="">All chapters</option>${master.chapters.map(c => `<option>${esc(c)}</option>`).join("")}`;
+  renderAllUnitGrids(); await renderResumeActions(); show("homeScreen", { replace: true });
 }
-function startObservationArea(area){state.obsArea=area;const seen=new Set();state.obsSession=observationItems(state.obsUnit).filter(x=>(x.areas||[]).includes(area)).filter(x=>{if(seen.has(x.key))return false;seen.add(x.key);return true}).sort((a,b)=>priorityRank(a.priority)-priorityRank(b.priority)||a.section.localeCompare(b.section));state.obsIndex=0;state.obsResponses={};if(!state.obsSession.length)return alert('No checks in this area.');show('observationCheckScreen');renderObservationCheck()}
-function priorityRank(p){return p==='High'?0:p==='Moderate'?1:2}
-function currentObs(){return state.obsSession[state.obsIndex]}
-function renderObservationCheck(){const x=currentObs();if(!x)return finishObservation();const resp=state.obsResponses[x.key]||{};$('obsBadges').innerHTML=`<span class="badge">${escapeHtml(x.section)}</span><span class="badge">${escapeHtml(x.priority||'')}</span>${x.scopeStatus==='CONDITIONAL'?'<span class="badge conditionalBadge">Conditional</span>':''}`;$('obsContext').textContent=`${unitName(state.obsUnit)} • ${state.obsArea} • ${state.obsIndex+1}/${state.obsSession.length}`;$('obsProgressFill').style.width=((state.obsIndex+1)/state.obsSession.length*100)+'%';$('obsCheckText').textContent=x.check;$('obsResultCurrent').textContent=resp.result||'Not scored';$('obsNote').value=resp.note||'';document.querySelectorAll('[data-obsresult]').forEach(b=>b.classList.toggle('active',resp.result===b.dataset.obsresult));$('obsHowBtn').onclick=()=>openModal('How to Check',x.howToCheck||'—');$('obsEvidenceBtn').onclick=()=>openModal('Evidence / Ask Who',x.evidenceAskWho||'—');$('obsStandardBtn').onclick=()=>openModal('Standard',x.standards||'—');$('obsMeBtn').onclick=()=>openModal('ME',x.mes||'—')}
-document.querySelectorAll('[data-obsresult]').forEach(b=>b.onclick=()=>{const x=currentObs();state.obsResponses[x.key]={...(state.obsResponses[x.key]||{}),result:b.dataset.obsresult,note:$('obsNote').value};$('obsResultCurrent').textContent=b.dataset.obsresult;document.querySelectorAll('[data-obsresult]').forEach(y=>y.classList.toggle('active',y===b))});
-$('obsNote').oninput=()=>{const x=currentObs();if(x)state.obsResponses[x.key]={...(state.obsResponses[x.key]||{}),note:$('obsNote').value}};
-function persistObs(){const x=currentObs();if(!x)return;let r=state.obsResponses[x.key]||{};r.note=$('obsNote').value;if(!r.result)r.result='N/A';state.obsResponses[x.key]=r}
-$('nextObs').onclick=()=>{persistObs();state.obsIndex++;renderObservationCheck()};$('skipObs').onclick=()=>{const x=currentObs();state.obsResponses[x.key]={result:'N/A',note:$('obsNote').value};state.obsIndex++;renderObservationCheck()};$('prevObs').onclick=()=>{persistObs();if(state.obsIndex>0)state.obsIndex--;renderObservationCheck()};
-async function finishObservation(){persistObs();const responses=state.obsSession.map(x=>({key:x.key,itemId:x.itemId,result:state.obsResponses[x.key]?.result||'N/A',note:state.obsResponses[x.key]?.note||''}));await idbAdd('observations',{date:new Date().toISOString(),unit:state.obsUnit,area:state.obsArea,itemKeys:state.obsSession.map(x=>x.key),responses});let c={Compliant:0,Partial:0,'Non-Compliant':0,'N/A':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);$('observationSummary').innerHTML=`<div class="listRow"><b>Unit</b><span>${escapeHtml(unitName(state.obsUnit))}</span></div><div class="listRow"><b>Area</b><span>${escapeHtml(state.obsArea)}</span></div><div class="listRow"><b>Checks</b><span class="count">${responses.length}</span></div><div class="listRow"><b>Compliant</b><span class="count">${c.Compliant||0}</span></div><div class="listRow"><b>Partial</b><span class="count">${c.Partial||0}</span></div><div class="listRow"><b>Non-Compliant</b><span class="count">${c['Non-Compliant']||0}</span></div><div class="listRow"><b>N/A</b><span class="count">${c['N/A']||0}</span></div>`;show('observationSummaryScreen')}
-$('nextObservationArea').onclick=()=>{renderObservationAreas();show('observationAreaScreen')};$('observationHome').onclick=()=>show('homeScreen');
+function renderDbStatus() { $("dbStatus").innerHTML = master ? `<b>Database ready</b><br>${esc(master.databaseVersion)}` : "<b>Database unavailable.</b><br>Import JCI_Tracer_Workflow_Pilot_DB_v0_7.json."; }
+async function importMaster(file) { const data = JSON.parse(await file.text()); if (!data.questions || !data.units || !data.observation || data.schemaVersion < 7) throw new Error("invalid database"); master = data; await idbPut("kv", { key: "master", value: data, imported: now() }); $("bankChapter").innerHTML = `<option value="">All chapters</option>${master.chapters.map(c => `<option>${esc(c)}</option>`).join("")}`; renderAllUnitGrids(); goHome(); }
 
-// REVIEW
-function openReviewHome(){show('reviewHomeScreen')}
-document.querySelectorAll('.reviewMode').forEach(b=>b.onclick=()=>{const m=b.dataset.reviewmode;if(m==='staff')show('staffReviewScreen');if(m==='unit'){renderAllUnitGrids();show('unitResultsUnitScreen')}if(m==='observation'){renderAllUnitGrids();show('obsResultsUnitScreen')}});
-$('loadStaffReview').onclick=loadStaffReview;async function loadStaffReview(){const id=$('staffReviewId').value.trim();if(!id)return;const sessions=(await idbAll('sessions')).filter(s=>s.staffId===id).sort((a,b)=>new Date(b.date)-new Date(a.date));let responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>responses.push(r)));const unique=new Set(responses.filter(r=>r.result&&r.result!=='Not Asked').map(r=>r.qid));const counts={Understood:0,Partial:0,'Not Understood':0,'Not Asked':0};responses.forEach(r=>counts[r.result]=(counts[r.result]||0)+1);let html=`<div class="metricGrid"><div class="metric"><b>${sessions.length}</b><span>Sessions</span></div><div class="metric"><b>${unique.size}</b><span>Unique questions</span></div><div class="metric"><b>${counts.Understood||0}</b><span>Understood</span></div><div class="metric"><b>${(counts.Partial||0)+(counts['Not Understood']||0)}</b><span>Needs follow-up</span></div></div>`;html+=sessions.length?sessions.map(s=>`<div class="sessionCard"><div class="sessionTitle">${escapeHtml(s.sourceName||s.sourceType||'Session')}</div><div class="sessionMeta">${unitName(s.unit)} • ${new Date(s.date).toLocaleString()} • ${s.role||''}</div>${(s.responses||[]).map(r=>{const q=qById(r.qid);return `<div class="resultRow"><div>${escapeHtml(q?.question||r.qid)}${r.note?`<div class="micro">${escapeHtml(r.note)}</div>`:''}</div><span class="resultTag ${resultClass(r.result)}">${escapeHtml(r.result)}</span></div>`}).join('')}</div>`).join(''):'<div class="muted">No interview sessions found for this Staff ID.</div>';$('staffReviewOutput').innerHTML=html}
-function resultClass(r){return r==='Understood'||r==='Compliant'?'rUnderstood':r==='Partial'?'rPartial':r==='Not Understood'||r==='Non-Compliant'?'rNotUnderstood':'rNotAsked'}
-function periodStart(selectId){const p=$(selectId).value,now=new Date();if(p==='ALL')return null;if(p==='TODAY')return new Date(now.getFullYear(),now.getMonth(),now.getDate());return new Date(Date.now()-7*86400000)}
-async function openUnitResults(u){state.resultUnit=u;$('unitResultsHeading').textContent=`${unitName(u)} — Interview Results`;await renderUnitResults();show('unitResultsScreen')}
-$('unitResultsChangeUnit').onclick=()=>show('unitResultsUnitScreen');$('resultPeriod').onchange=renderUnitResults;async function filteredResultSessions(){const start=periodStart('resultPeriod');return (await idbAll('sessions')).filter(s=>s.unit===state.resultUnit&&(!start||new Date(s.date)>=start))}
-async function renderUnitResults(){const sessions=await filteredResultSessions(),staff=new Set(sessions.map(s=>s.staffId)),responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>{if(r.result&&r.result!=='Not Asked')responses.push({...r,session:s})}));const c={Understood:0,Partial:0,'Not Understood':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);const byQ={};responses.forEach(r=>{const x=byQ[r.qid]||(byQ[r.qid]={asked:0,Understood:0,Partial:0,'Not Understood':0});x.asked++;x[r.result]=(x[r.result]||0)+1});const weak=Object.entries(byQ).map(([qid,x])=>({qid,...x,gap:(x.Partial||0)+(x['Not Understood']||0)})).sort((a,b)=>b.gap-a.gap||b.asked-a.asked);let html=`<div class="metricGrid"><div class="metric"><b>${staff.size}</b><span>Staff assessed</span></div><div class="metric"><b>${sessions.length}</b><span>Sessions</span></div><div class="metric"><b>${responses.length}</b><span>Scored responses</span></div><div class="metric"><b>${(c.Partial||0)+(c['Not Understood']||0)}</b><span>Needs follow-up</span></div></div><div class="sectionLabel">Questions needing attention</div>`;html+=weak.length?weak.slice(0,30).map(x=>{const q=qById(x.qid);return `<div class="resultRow"><div><b>${q?.chapter||''}</b> — ${escapeHtml(q?.question||x.qid)}<div class="micro">Asked ${x.asked} • Partial ${x.Partial||0} • Not Understood ${x['Not Understood']||0}</div></div><span class="count">${x.gap}</span></div>`}).join(''):'<div class="muted">No scored interview responses in this period yet.</div>';$('unitResultsOutput').innerHTML=html}
-$('exportUnitCsv').onclick=async()=>exportSessionsCsv(await filteredResultSessions(),`${state.resultUnit}_${$('resultPeriod').value}_Interview_Results`);
+async function renderResumeActions() {
+  document.querySelectorAll(".resumeChoice").forEach(x => x.remove());
+  const i = await idbGet("kv", "activeInterview"), o = await idbGet("kv", "activeObservationRound");
+  if (i?.value?.session?.length) { const b = document.createElement("button"); b.className = "resumeChoice"; b.innerHTML = `<b>Resume Interview</b><small>${esc(unitName(i.value.unit))} • ${esc(i.value.staffId)}</small>`; b.onclick = () => { Object.assign(state, i.value); renderInterviewRun(); show("interviewRunScreen"); }; $("homeScreen").appendChild(b); }
+  if (o?.value?.id) { const b = document.createElement("button"); b.className = "resumeChoice observationResume"; b.innerHTML = `<b>Resume Unit Round</b><small>${esc(unitName(o.value.unit))}</small>`; b.onclick = () => { state.obsRound = o.value; state.obsUnit = o.value.unit; renderObservationAreas(); show("observationAreaScreen"); }; $("homeScreen").appendChild(b); }
+}
 
-async function openObsResults(u){state.obsResultUnit=u;$('obsResultsHeading').textContent=`${unitName(u)} — Observation Results`;await renderObsResults();show('obsResultsScreen')}
-$('obsResultsChangeUnit').onclick=()=>show('obsResultsUnitScreen');$('obsResultPeriod').onchange=renderObsResults;async function filteredObsSessions(){const start=periodStart('obsResultPeriod');return (await idbAll('observations')).filter(s=>s.unit===state.obsResultUnit&&(!start||new Date(s.date)>=start))}
-async function renderObsResults(){const sessions=await filteredObsSessions(),responses=[];sessions.forEach(s=>(s.responses||[]).forEach(r=>{if(r.result&&r.result!=='N/A')responses.push({...r,session:s})}));const c={Compliant:0,Partial:0,'Non-Compliant':0};responses.forEach(r=>c[r.result]=(c[r.result]||0)+1);const byArea=defaultAreaCounts(sessions);let html=`<div class="metricGrid"><div class="metric"><b>${sessions.length}</b><span>Area rounds</span></div><div class="metric"><b>${responses.length}</b><span>Scored checks</span></div><div class="metric"><b>${c.Compliant||0}</b><span>Compliant</span></div><div class="metric"><b>${(c.Partial||0)+(c['Non-Compliant']||0)}</b><span>Findings</span></div></div><div class="sectionLabel">By area</div>`;html+=Object.entries(byArea).sort((a,b)=>b[1].findings-a[1].findings).map(([area,x])=>`<div class="resultRow"><div><b>${escapeHtml(area)}</b><div class="micro">Rounds ${x.rounds} • Scored ${x.scored}</div></div><span class="count">${x.findings} findings</span></div>`).join('')||'<div class="muted">No observation rounds in this period yet.</div>';$('obsResultsOutput').innerHTML=html}
-function defaultAreaCounts(sessions){const o={};for(const s of sessions){const x=o[s.area]||(o[s.area]={rounds:0,scored:0,findings:0});x.rounds++;for(const r of s.responses||[]){if(r.result&&r.result!=='N/A'){x.scored++;if(r.result==='Partial'||r.result==='Non-Compliant')x.findings++}}}return o}
-$('exportObsUnitCsv').onclick=async()=>exportObservationCsv(await filteredObsSessions(),`${state.obsResultUnit}_${$('obsResultPeriod').value}_Observation_Results`);
+function unitButtons(target, handler, kind) {
+  $(target).innerHTML = master.units.map(u => { const summary = master.unitSummary?.[u.id] || {}, unavailable = kind === "observation" && !summary.observationChecks, count = kind === "interview" ? `${summary.cleanInterviewBank ?? 0} Q` : unavailable ? "No checklist yet" : `${summary.observationChecks} Checks`; return `<button class="unitCard ${unavailable ? "disabled" : ""}" data-family="${esc(u.family || "")}" data-unit="${esc(u.id)}" ${unavailable ? "disabled" : ""}><b>${esc(u.name)}</b><span class="countBadge">${esc(count)}</span></button>`; }).join("");
+  document.querySelectorAll(`#${target} [data-unit]:not([disabled])`).forEach(button => button.onclick = () => handler(button.dataset.unit));
+}
+function renderAllUnitGrids() { unitButtons("interviewUnitGrid", selectInterviewUnit, "interview"); unitButtons("observationUnitGrid", selectObservationUnit, "observation"); }
 
-// DATA / BACKUP
-async function openData(){const staff=await idbAll('staff'),reviews=await idbAll('reviews'),sessions=await idbAll('sessions'),templates=await idbAll('templates'),observations=await idbAll('observations');$('dataSummary').innerHTML=`<b>App</b>: v${APP_VERSION}<br><b>Pilot DB</b>: ${master?.databaseVersion||'Not imported'}<br><b>Policy verification</b>: ${escapeHtml(master?.policyVerificationStatus||'Pending')}<br><b>Staff IDs</b>: ${staff.length}<br><b>Interview sessions</b>: ${sessions.length}<br><b>Observation rounds</b>: ${observations.length}<br><b>Saved session templates</b>: ${templates.length}<br><b>Question flags</b>: ${reviews.length}`;show('dataScreen')}
-$('exportBackupBtn').onclick=exportBackup;$('importBackupBtn').onclick=()=>$('backupFile').click();$('replaceMasterBtn').onclick=()=>$('dbFile').click();$('exportAllCsvBtn').onclick=async()=>exportSessionsCsv(await idbAll('sessions'),'All_Interview_Results');$('exportAllObsCsvBtn').onclick=async()=>exportObservationCsv(await idbAll('observations'),'All_Observation_Results');
-async function exportBackup(){const out={app:'JCITracerLocalV05',exported:new Date().toISOString(),masterInfo:{databaseVersion:master?.databaseVersion||null},reviews:await idbAll('reviews'),staff:await idbAll('staff'),sessions:await idbAll('sessions'),templates:await idbAll('templates'),observations:await idbAll('observations'),pins:(await idbGet('kv','pins'))?.value||[]};downloadBlob(JSON.stringify(out,null,2),'application/json',`JCI_Tracer_Backup_${new Date().toISOString().slice(0,10)}.json`)}
-$('backupFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!['JCITracerLocalV05','JCITracerLocalV04','JCITracerLocalV03'].includes(obj.app))throw new Error();await idbClear('reviews');await idbClear('staff');await idbClear('sessions');await idbClear('templates');await idbClear('observations');for(const x of obj.reviews||[])await idbPut('reviews',x);for(const x of obj.staff||[])await idbPut('staff',x);for(const x of obj.sessions||[])await idbAdd('sessions',x);for(const x of obj.templates||[])await idbAdd('templates',x);for(const x of obj.observations||[])await idbAdd('observations',x);await idbPut('kv',{key:'pins',value:obj.pins||[]});toast('Backup restored');await openData()}catch(err){alert('Invalid backup file.')}e.target.value=''};
-async function exportSessionsCsv(sessions,name){const rows=[['Date','Unit','Staff ID','Role','Session Type','Session Name','Question ID','Chapter','Question','Result','Note']];sessions.forEach(s=>(s.responses||[]).forEach(r=>{const q=qById(r.qid);rows.push([s.date,unitName(s.unit),s.staffId,s.role||'',s.sourceType||'',s.sourceName||'',r.qid,q?.chapter||'',q?.question||'',r.result||'',r.note||''])}));downloadCsv(rows,`JCI_${name}_${new Date().toISOString().slice(0,10)}.csv`)}
-async function exportObservationCsv(sessions,name){const rows=[['Date','Unit','Area','Item ID','Section','Observation Check','Result','Finding / Note','Standard','ME']];sessions.forEach(s=>(s.responses||[]).forEach(r=>{const x=obsByKey(r.key);rows.push([s.date,unitName(s.unit),s.area,r.itemId||x?.itemId||'',x?.section||'',x?.check||'',r.result||'',r.note||'',x?.standards||'',x?.mes||''])}));downloadCsv(rows,`JCI_${name}_${new Date().toISOString().slice(0,10)}.csv`)}
-function downloadCsv(rows,name){const csv=rows.map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');downloadBlob('\ufeff'+csv,'text/csv;charset=utf-8',name)}
-function downloadBlob(content,type,name){const blob=new Blob([content],{type}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+// Interview setup
+function selectInterviewUnit(unitId) { Object.assign(state, { unit: unitId, role: null, mode: null, tags: [], chapters: [], requestedCount: 8, bankSelected: [] }); $("interviewRoleHeading").textContent = `${unitName(unitId)} — Choose Role`; show("interviewRoleScreen"); }
+function openInterviewModes() { $("interviewContext").textContent = `${unitName(state.unit)} • ${roleName(state.role)}`; show("interviewModeScreen"); }
+function situationTags(unitId, role) { const candidates = new Set(master.patientTagsByUnit?.[unitId] || []); for (const q of master.questions) if (eligible(q, unitId, role) && activeOrConditional(q, unitId)) questionTags(q).forEach(t => candidates.add(t)); return [...candidates].filter(tag => master.questions.some(q => eligible(q, unitId, role) && activeOrConditional(q, unitId) && matchesSituation(q, tag))).sort(); }
+async function notRelevantIds(unitId) { const reviews = await idbAll("reviews"); return new Set(reviews.filter(r => r.key?.startsWith(`UNIT|${unitId}|`) && r.status === "Not Relevant").map(r => r.key.split("|")[2])); }
+async function generatedPool() { const hidden = await notRelevantIds(state.unit); let pool = master.questions.filter(q => eligible(q, state.unit, state.role) && activeOrConditional(q, state.unit) && !hidden.has(q.id)); if (state.mode === "general") pool = pool.filter(q => q.generalCore); if (state.mode === "situation") pool = pool.filter(q => state.tags.some(t => matchesSituation(q, t))); if (state.mode === "chapter") pool = pool.filter(q => state.chapters.includes(q.chapter)); return pool; }
+function chooseMode(mode) { state.mode = mode; state.tags = []; state.chapters = []; state.requestedCount = 8; if (["quick", "general"].includes(mode)) return prepareGeneratedStart(); if (mode === "more") return show("moreInterviewScreen"); renderBuilder(mode); show("builderScreen"); }
+function renderBuilder(mode) { const isSituation = mode === "situation"; $("builderTitle").textContent = isSituation ? "Patient / Situation" : "By Chapter"; const values = isSituation ? situationTags(state.unit, state.role) : master.chapters; $("builderGrid").innerHTML = values.length ? values.map(v => `<button class="choice builderOption" data-value="${esc(v)}">${esc(v)}</button>`).join("") : `<div class="notice">No supported options are available for this unit and role.</div>`; $("builderCount").value = "8"; $("builderStatus").textContent = ""; document.querySelectorAll(".builderOption").forEach(button => button.onclick = () => { button.classList.toggle("selected"); const selected = [...document.querySelectorAll(".builderOption.selected")].map(x => x.dataset.value); if (isSituation) state.tags = selected; else state.chapters = selected; $("builderStatus").textContent = `${selected.length} selected`; }); }
+async function prepareGeneratedStart() { const pool = await generatedPool(); if (!pool.length) return alert("No matching questions are available."); state.pendingStart = { kind: "generated" }; prepareStaffConfirm(); }
+function pendingDescription() { const n = `${state.requestedCount} Q`; if (state.pendingStart?.kind === "template") return `${state.pendingStart.template.name} • ${state.pendingStart.template.qids.length} Q`; if (state.pendingStart?.kind === "manual") return `Manual Session • ${state.bankSelected.length} Q`; const focus = state.tags.length ? ` • ${state.tags.join(" / ")}` : state.chapters.length ? ` • ${state.chapters.join(", ")}` : ""; return `${modeLabels[state.mode]} • ${n}${focus}`; }
+function prepareStaffConfirm(keepStaff = state.keepStaffNext || false) { state.keepStaffNext = false; if (!keepStaff) state.staffId = ""; $("staffConfirmId").value = state.staffId; $("staffConfirmContext").textContent = `${unitName(state.unit)} • ${roleName(state.role)} • ${pendingDescription()}`; $("changeQuestionCount").classList.toggle("hidden", ["manual", "saved"].includes(state.mode) || ["manual", "template"].includes(state.pendingStart?.kind)); show("staffConfirmScreen"); }
+async function askedIds(staffId) { if (!staffId) return new Set(); const staff = await idbGet("staff", staffId); return new Set((staff?.asked || []).map(x => x.qid)); }
+function prioritized(pool, count, asked) { return [...shuffle(pool.filter(q => !asked.has(q.id))), ...shuffle(pool.filter(q => asked.has(q.id)))].slice(0, count); }
+function balanced(pool, count, asked) { const selected = [], used = new Set(); const add = (items, number) => prioritized(items.filter(x => !used.has(x.id)), number, asked).forEach(q => { used.add(q.id); selected.push(q); }); add(pool.filter(q => q.generalCore), Math.ceil(count * .5)); add(pool.filter(q => statusFor(q, state.unit) === "ACTIVE"), Math.ceil(count * .3)); add(pool, count - selected.length); return selected.slice(0, count); }
+async function startInterview() {
+  const staffId = $("staffConfirmId").value.trim(); if (!staffId) return alert("Enter Staff ID."); state.staffId = staffId; const asked = await askedIds(staffId); let chosen = [];
+  if (state.pendingStart?.kind === "template") chosen = state.pendingStart.template.qids.map(qById).filter(q => q && eligible(q, state.unit, state.role));
+  else if (state.pendingStart?.kind === "manual") chosen = state.bankSelected.map(qById).filter(Boolean);
+  else { const pool = await generatedPool(); chosen = state.mode === "quick" ? balanced(pool, Math.min(state.requestedCount, pool.length), asked) : prioritized(pool, Math.min(state.requestedCount, pool.length), asked); }
+  if (!chosen.length) return alert("No questions are available for this session.");
+  state.session = chosen.map(q => q.id); state.responses = {}; state.sourceType = state.pendingStart?.kind === "template" ? "Saved" : state.pendingStart?.kind === "manual" ? "Manual" : "Generated"; state.sourceName = state.pendingStart?.kind === "template" ? state.pendingStart.template.name : modeLabels[state.mode]; await saveActiveInterview(); renderInterviewRun(); show("interviewRunScreen");
+}
+async function saveActiveInterview() { await idbPut("kv", { key: "activeInterview", value: { unit: state.unit, role: state.role, mode: state.mode, tags: state.tags, chapters: state.chapters, requestedCount: state.requestedCount, staffId: state.staffId, session: state.session, responses: state.responses, pendingStart: state.pendingStart, sourceType: state.sourceType, sourceName: state.sourceName } }); }
+function topicFor(q) { return q?.tags?.[0] || q?.patientTags?.[0] || q?.chapter || "Question"; }
+function resultClass(result) { return result?.toLowerCase().replaceAll(" ", "").replaceAll("/", "") || ""; }
+function renderInterviewRun(openId = null) {
+  const completed = state.session.filter(id => state.responses[id]?.result).length; $("interviewRunContext").textContent = `${unitName(state.unit)} • ${state.staffId} • ${roleName(state.role)} • ${state.sourceName}`; $("interviewProgress").textContent = `${completed} of ${state.session.length} completed`; $("interviewProgressFill").style.width = `${state.session.length ? completed / state.session.length * 100 : 0}%`;
+  $("interviewQuestionList").innerHTML = state.session.map((id, index) => { const q = qById(id), response = state.responses[id] || {}, result = response.result || "Not assessed"; return `<article class="accordion ${openId === id ? "open" : ""}" data-id="${esc(id)}"><button class="accordionHeader"><span class="accordionNumber">${index + 1}</span><span><span class="accordionTitle">${esc(topicFor(q))}</span><span class="accordionMeta">${esc(q?.chapter)} • ${esc(q?.standard)} ${esc(q?.me)}</span></span><span class="statusBadge ${resultClass(result)}">${esc(result)}</span></button><div class="accordionBody"><div class="questionFull">${esc(q?.question).replace(/\n/g, "<br>")}</div><div class="resultButtons">${interviewResults.map(r => `<button class="${resultClass(r)} ${response.result === r ? "active" : ""}" data-result="${esc(r)}">${esc(r)}</button>`).join("")}</div><label>Staff note (optional)</label><textarea data-note placeholder="Add note">${esc(response.note || "")}</textarea><div class="detailActions"><button data-details>Details</button><button data-pin>${response.pin ? "Unpin" : "Pin"}</button><button data-flag>${response.flag ? "Unflag" : "Flag"}</button></div></div></article>`; }).join(""); bindInterviewCards();
+}
+function bindInterviewCards() { document.querySelectorAll("#interviewQuestionList .accordion").forEach(card => { const id = card.dataset.id; card.querySelector(".accordionHeader").onclick = () => card.classList.toggle("open"); card.querySelectorAll("[data-result]").forEach(button => button.onclick = async () => { state.responses[id] = { ...(state.responses[id] || {}), result: button.dataset.result }; await saveActiveInterview(); renderInterviewRun(id); }); card.querySelector("[data-note]").oninput = event => { clearTimeout(noteTimer); state.responses[id] = { ...(state.responses[id] || {}), note: event.target.value }; noteTimer = setTimeout(saveActiveInterview, 250); }; card.querySelector("[data-details]").onclick = () => showQuestionDetails(qById(id)); card.querySelector("[data-pin]").onclick = async () => { state.responses[id] = { ...(state.responses[id] || {}), pin: !state.responses[id]?.pin }; await saveActiveInterview(); renderInterviewRun(id); }; card.querySelector("[data-flag]").onclick = async () => { state.responses[id] = { ...(state.responses[id] || {}), flag: !state.responses[id]?.flag }; await saveActiveInterview(); renderInterviewRun(id); }; }); }
+function showQuestionDetails(q) { const refs = (q.sourceRefs || []).map(r => `<div class="sourceBlock"><b>${esc(r.standard)} ${esc(r.me)}</b><p>${esc(r.standardStatement || "")}</p><p>${esc(r.meText || "")}</p></div>`).join(""); openModal("Question Details", `<div class="sourceBlock"><b>JCI Expected Answer</b><p>${esc(q.expected || "").replace(/\n/g, "<br>")}</p></div><div class="sourceBlock"><b>Local Policy Answer</b><p>${q.policy ? esc(q.policy).replace(/\n/g, "<br>") : "Pending Verification"}</p><p class="micro">${esc(q.policyRef || "")}</p></div>${refs || `<div class="sourceBlock"><b>Standard / ME</b><p>${esc(q.standard)} ${esc(q.me)}</p></div>`}`, true); }
+async function finishInterview() { const record = { date: now(), unit: state.unit, staffId: state.staffId, role: state.role, mode: state.mode, sourceType: state.sourceType, sourceName: state.sourceName, qids: [...state.session], responses: state.session.map(qid => ({ qid, ...(state.responses[qid] || {}) })) }; record.id = await idbAdd("sessions", record); let staff = await idbGet("staff", state.staffId) || { id: state.staffId, asked: [] }; for (const r of record.responses) if (r.result && r.result !== "Not Asked" && !staff.asked.some(x => x.qid === r.qid)) staff.asked.push({ qid: r.qid, unit: state.unit, role: state.role, date: record.date }); await idbPut("staff", staff); await idbPut("kv", { key: "activeInterview", value: null }); state.lastInterview = record; renderInterviewSummary(record); show("interviewSummaryScreen"); await renderResumeActions(); }
+function countsFor(responses, options) { const c = Object.fromEntries(options.map(x => [x, 0])); for (const r of responses) if (r.result in c) c[r.result]++; return c; }
+function stackedBar(counts, total, labels) { return `<div class="stackedBar">${labels.map(([key, cls]) => `<span class="${cls}" style="width:${total ? counts[key] / total * 100 : 0}%"></span>`).join("")}</div><div class="legend">${labels.map(([key, cls]) => `<span><i class="${cls}"></i>${esc(key)} ${counts[key] || 0}</span>`).join("")}</div>`; }
+function renderInterviewSummary(record) { const c = countsFor(record.responses, interviewResults), completed = record.responses.filter(r => r.result && r.result !== "Not Asked").length, gaps = record.responses.filter(r => ["Partial", "Not Understood"].includes(r.result)); $("interviewSummary").innerHTML = `<div class="contextLine">${esc(unitName(record.unit))} • Staff ${esc(record.staffId)} • ${esc(roleName(record.role))} • ${esc(record.sourceName)} • ${new Date(record.date).toLocaleString()}</div><div class="summaryCards"><div class="summaryCard"><b>${record.responses.length}</b><span>Questions</span></div><div class="summaryCard"><b>${completed}</b><span>Completed</span></div><div class="summaryCard"><b>${c.Partial}</b><span>Partial</span></div><div class="summaryCard"><b>${c["Not Understood"]}</b><span>Not Understood</span></div></div>${stackedBar(c, record.responses.length, [["Understood", "barGreen"], ["Partial", "barAmber"], ["Not Understood", "barRed"], ["Not Asked", "barGray"]])}<h3>Needs Follow-up</h3><div class="followList">${gaps.length ? gaps.map(r => `<button class="followItem textBtn" data-gap="${esc(r.qid)}"><b>${esc(topicFor(qById(r.qid)))}</b> — ${esc(r.result)}</button>`).join("") : `<div class="muted">No follow-up gaps recorded.</div>`}</div>`; document.querySelectorAll("[data-gap]").forEach(b => b.onclick = () => showQuestionDetails(qById(b.dataset.gap))); }
 
-// MODAL / NAV
-function openModal(title,body,isHtml=false){$('modalTitle').textContent=title;$('modalBody').innerHTML=isHtml?body:escapeHtml(body).replace(/\n/g,'<br>');$('modal').classList.remove('hidden')}
-function closeModal(){$('modal').classList.add('hidden')}$('modalClose').onclick=closeModal;$('modal').onclick=e=>{if(e.target.id==='modal')closeModal()};
-document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));
-$('dataBtn').onclick=openData;
-document.querySelectorAll('[data-mainnav]').forEach(b=>b.onclick=()=>{const n=b.dataset.mainnav;if(!master)return show('setupScreen');if(n==='home')show('homeScreen');if(n==='bank'){renderAllUnitGrids();show('bankUnitScreen')}if(n==='saved'){state.savedRoleFilter=null;renderAllUnitGrids();show('savedUnitScreen')}if(n==='review')openReviewHome();if(n==='data')openData()});
+// Manual bank and templates
+function openManualBank() { state.mode = "manual"; state.bankOrigin = "flow"; state.bankSelected = []; $("bankSearch").value = ""; $("bankChapter").value = ""; renderBank(); show("bankScreen"); }
+function renderBank() { const search = ($("bankSearch").value || "").toLowerCase(), chapter = $("bankChapter").value || ""; const pool = master.questions.filter(q => eligible(q, state.unit, state.role) && activeOrConditional(q, state.unit) && (!chapter || q.chapter === chapter) && (!search || `${q.question} ${q.chapter} ${topicFor(q)}`.toLowerCase().includes(search))); $("bankHeading").textContent = `${unitName(state.unit)} — Manual Bank`; $("bankCount").textContent = `${pool.length} questions`; $("selectedCount").textContent = `${state.bankSelected.length} selected`; $("bankList").innerHTML = pool.map(q => `<label class="bankRow"><input type="checkbox" data-qid="${esc(q.id)}" ${state.bankSelected.includes(q.id) ? "checked" : ""}><span class="bankQuestion"><b>${esc(topicFor(q))}</b><br>${esc(q.question)}</span><span class="micro">${esc(q.chapter)}</span></label>`).join(""); document.querySelectorAll("#bankList [data-qid]").forEach(input => input.onchange = () => { state.bankSelected = input.checked ? [...new Set([...state.bankSelected, input.dataset.qid])] : state.bankSelected.filter(x => x !== input.dataset.qid); $("selectedCount").textContent = `${state.bankSelected.length} selected`; }); }
+function renderSelection() { $("selectionList").innerHTML = state.bankSelected.map((id, i) => { const q = qById(id); return `<div class="historyCard"><b>${i + 1}. ${esc(topicFor(q))}</b><div class="micro">${esc(q.chapter)} • ${esc(q.id)}</div><p>${esc(q.question)}</p></div>`; }).join(""); }
+function manualToStaff() { if (!state.bankSelected.length) return alert("Select at least one question."); state.pendingStart = { kind: "manual" }; prepareStaffConfirm(); }
+async function saveTemplateAndStart() { if (!state.bankSelected.length) return alert("Select at least one question."); const name = prompt("Session name"); if (!name?.trim()) return; await idbAdd("templates", { name: name.trim(), unit: state.unit, role: state.role, qids: [...state.bankSelected], created: now() }); toast("Saved Session created"); manualToStaff(); }
+async function renderSavedList() { const templates = (await idbAll("templates")).filter(t => t.unit === state.unit && t.role === state.role); $("savedContext").textContent = `${unitName(state.unit)} • ${roleName(state.role)}`; $("savedList").innerHTML = templates.length ? templates.map(t => `<button class="savedCard choice" data-template="${t.id}"><span class="savedTitle">${esc(t.name)}</span><span class="savedMeta">${t.qids.length} questions</span></button>`).join("") : `<div class="notice">No Saved Sessions for this unit and role.</div>`; document.querySelectorAll("[data-template]").forEach(b => b.onclick = () => { const t = templates.find(x => String(x.id) === b.dataset.template); state.mode = "saved"; state.pendingStart = { kind: "template", template: t }; prepareStaffConfirm(); }); }
+
+// Observation round
+function displayArea(area) { return master.observation?.areaDisplayNames?.[area] || area; }
+function areaCatalogue(unitId) { const map = new Map(); for (const item of master.observation.items.filter(x => x.unit === unitId && x.scopeStatus !== "HIDDEN")) for (const area of item.areas || []) { if (!map.has(area)) map.set(area, []); map.get(area).push(item.key); } const route = master.observation.areaRoute || []; return [...map.entries()].map(([key, keys]) => ({ key, name: displayArea(key), keys: [...new Set(keys)] })).sort((a, b) => { const ai = route.indexOf(a.key), bi = route.indexOf(b.key); return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.name.localeCompare(b.name); }); }
+async function selectObservationUnit(unitId) { state.obsUnit = unitId; const saved = await idbGet("kv", "activeObservationRound"); if (saved?.value?.unit === unitId && saved.value.status === "IN_PROGRESS") state.obsRound = saved.value; else state.obsRound = { id: uid("ROUND"), unit: unitId, started: now(), status: "IN_PROGRESS", areas: {} }; await saveRound(); renderObservationAreas(); show("observationAreaScreen"); }
+async function saveRound() { if (state.obsRound) await idbPut("kv", { key: "activeObservationRound", value: state.obsRound }); }
+function areaState(key) { return state.obsRound.areas[key] || { status: "NOT_STARTED", reason: "", responses: {} }; }
+function renderObservationAreas() { const areas = areaCatalogue(state.obsUnit); $("observationAreaHeading").textContent = `${unitName(state.obsUnit)} — Choose Area`; const done = areas.filter(a => ["COMPLETED", "SKIPPED"].includes(areaState(a.key).status)).length; $("observationRoundProgress").textContent = `${done} of ${areas.length} areas completed or skipped`; $("obsSourceGap").classList.toggle("hidden", !!areas.length); if (!areas.length) $("obsSourceGap").textContent = "No checklist yet."; $("observationAreaGrid").innerHTML = areas.map(area => { const a = areaState(area.key), label = a.status === "NOT_STARTED" ? "Not Started" : a.status === "IN_PROGRESS" ? "In Progress" : a.status === "COMPLETED" ? "Completed" : `Skipped: ${a.reason}`; return `<div class="areaCardWrap"><button class="areaCard" data-area="${esc(area.key)}"><b>${esc(area.name)}</b><span><span class="countBadge">${area.keys.length} Checks</span><span class="areaStatus">${esc(label)}</span></span></button>${a.status === "NOT_STARTED" ? `<button class="skipArea textBtn" data-skip="${esc(area.key)}">Skip Area</button>` : ""}</div>`; }).join(""); $("finishRoundWrap").classList.toggle("hidden", !areas.length); document.querySelectorAll("[data-area]").forEach(b => b.onclick = () => openObservationArea(b.dataset.area)); document.querySelectorAll("[data-skip]").forEach(b => b.onclick = () => chooseSkipReason(b.dataset.skip)); }
+async function openObservationArea(areaKey) { state.obsArea = areaKey; const a = areaState(areaKey); if (a.status === "NOT_STARTED") a.status = "IN_PROGRESS"; state.obsRound.areas[areaKey] = a; await saveRound(); renderObservationRun(); show("observationRunScreen"); }
+function chooseSkipReason(areaKey) { openModal("Skip Area", ["Not Available", "Closed", "No Patient / No Activity", "Not Visited"].map(r => `<button class="choice skipReason" data-reason="${esc(r)}">${esc(r)}</button>`).join(""), true); document.querySelectorAll(".skipReason").forEach(b => b.onclick = async () => { state.obsRound.areas[areaKey] = { status: "SKIPPED", reason: b.dataset.reason, responses: {} }; await saveRound(); closeModal(); renderObservationAreas(); }); }
+function observationChecks(areaKey) { const area = areaCatalogue(state.obsUnit).find(a => a.key === areaKey); return (area?.keys || []).map(obsByKey).filter(Boolean); }
+function renderObservationRun(openKey = null) { const checks = observationChecks(state.obsArea), area = areaState(state.obsArea), completed = checks.filter(x => area.responses[x.key]?.result).length; $("observationRunTitle").textContent = displayArea(state.obsArea); $("observationRunContext").textContent = `${unitName(state.obsUnit)} • ${displayArea(state.obsArea)}`; $("observationProgress").textContent = `${completed} of ${checks.length} completed`; $("observationProgressFill").style.width = `${checks.length ? completed / checks.length * 100 : 0}%`; $("observationCheckList").innerHTML = checks.map((item, index) => { const response = area.responses[item.key] || {}, result = response.result || "Not assessed"; return `<article class="accordion ${openKey === item.key ? "open" : ""}" data-key="${esc(item.key)}"><button class="accordionHeader"><span class="accordionNumber">${index + 1}</span><span><span class="accordionTitle">${esc(item.section || "Observation Check")}</span><span class="accordionMeta">${esc(item.itemId)} • ${esc(item.standards || "")}</span></span><span class="statusBadge ${resultClass(result)}">${esc(result)}</span></button><div class="accordionBody"><div class="questionFull">${esc(item.check)}</div><div class="resultButtons">${observationResults.map(r => `<button class="${resultClass(r)} ${response.result === r ? "active" : ""}" data-result="${esc(r)}">${esc(r)}</button>`).join("")}</div><label>Finding / Note (optional)</label><textarea data-note placeholder="Add finding">${esc(response.note || "")}</textarea><div class="detailActions"><button data-details>Details</button></div></div></article>`; }).join(""); document.querySelectorAll("#observationCheckList .accordion").forEach(card => { const key = card.dataset.key; card.querySelector(".accordionHeader").onclick = () => card.classList.toggle("open"); card.querySelectorAll("[data-result]").forEach(button => button.onclick = async () => { area.responses[key] = { ...(area.responses[key] || {}), result: button.dataset.result }; await saveRound(); renderObservationRun(key); }); card.querySelector("[data-note]").oninput = event => { clearTimeout(noteTimer); area.responses[key] = { ...(area.responses[key] || {}), note: event.target.value }; noteTimer = setTimeout(saveRound, 250); }; card.querySelector("[data-details]").onclick = () => showObservationDetails(obsByKey(key)); }); }
+function showObservationDetails(item) { const refs = (item.jciRefs || []).map(r => `<div class="sourceBlock"><b>${esc(r.standard)} ${esc(r.me)}</b><p>${esc(r.standardStatement || "")}</p><p>${esc(r.meText || "")}</p></div>`).join(""); openModal("Observation Details", `<div class="sourceBlock"><b>How to Check</b><p>${esc(item.howToCheck || "")}</p></div><div class="sourceBlock"><b>Evidence / Ask Who</b><p>${esc(item.evidenceAskWho || "")}</p></div>${refs || `<div class="sourceBlock"><b>JCI Standard / ME</b><p>${esc(item.standards || "")} • ${esc(item.mes || "")}</p></div>`}<div class="sourceBlock"><b>Local Expected Evidence</b><p>${esc(item.localExpectedEvidence || "Pending Verification")}</p></div><div class="sourceBlock"><b>Local Policy</b><p>${esc(item.localPolicy || "Pending Verification")}</p><p class="micro">Source: ${esc(item.policySource || "Not linked")} • Status: ${esc(item.policyVerificationStatus || "PENDING_VERIFICATION")}</p></div>`, true); }
+async function completeArea() { const area = areaState(state.obsArea); area.status = "COMPLETED"; area.completed = now(); state.obsRound.areas[state.obsArea] = area; await saveRound(); const responses = Object.values(area.responses), c = countsFor(responses, observationResults); $("areaCompleteSummary").innerHTML = `<div class="contextLine">${esc(unitName(state.obsUnit))} • ${esc(displayArea(state.obsArea))}</div><div class="summaryCards"><div class="summaryCard"><b>${c.Compliant}</b><span>Compliant</span></div><div class="summaryCard"><b>${c.Partial}</b><span>Partial</span></div><div class="summaryCard"><b>${c["Non-Compliant"]}</b><span>Non-Compliant</span></div><div class="summaryCard"><b>${c["N/A"]}</b><span>N/A</span></div></div>`; show("areaCompleteScreen"); }
+function nextArea() { const areas = areaCatalogue(state.obsUnit), current = areas.findIndex(a => a.key === state.obsArea), next = [...areas.slice(current + 1), ...areas.slice(0, current)].find(a => !["COMPLETED", "SKIPPED"].includes(areaState(a.key).status)); if (next) openObservationArea(next.key); else finishRound(); }
+async function finishRound() { const areas = areaCatalogue(state.obsUnit), record = JSON.parse(JSON.stringify(state.obsRound)); record.completed = now(); record.status = "COMPLETED"; await idbPut("rounds", record); await idbPut("kv", { key: "activeObservationRound", value: null }); state.obsRound = record; state.lastRound = record; renderRoundSummary(record, areas); show("observationSummaryScreen"); await renderResumeActions(); }
+function flattenedRound(record) { const rows = []; for (const [areaKey, area] of Object.entries(record.areas || {})) for (const [key, response] of Object.entries(area.responses || {})) rows.push({ areaKey, key, ...response }); return rows; }
+function renderRoundSummary(record, areas = areaCatalogue(record.unit)) { const rows = flattenedRound(record), c = countsFor(rows, observationResults), visited = areas.filter(a => record.areas?.[a.key]?.status === "COMPLETED"), skipped = areas.filter(a => record.areas?.[a.key]?.status === "SKIPPED"), remaining = areas.filter(a => !["COMPLETED", "SKIPPED"].includes(record.areas?.[a.key]?.status)), expectedChecks = visited.reduce((n, a) => n + a.keys.length, 0), assessed = rows.filter(r => r.result).length, notAssessed = Math.max(0, expectedChecks - assessed), findings = rows.filter(r => ["Partial", "Non-Compliant"].includes(r.result)); c["Not assessed"] = notAssessed; $("observationSummary").innerHTML = `<div class="contextLine">${esc(unitName(record.unit))} • ${esc(record.id)} • ${new Date(record.completed || record.started).toLocaleString()}</div><div class="summaryCards"><div class="summaryCard"><b>${visited.length}</b><span>Areas completed</span></div><div class="summaryCard"><b>${skipped.length}</b><span>Areas skipped</span></div><div class="summaryCard"><b>${remaining.length}</b><span>Areas remaining</span></div><div class="summaryCard"><b>${assessed}</b><span>Checks assessed</span></div></div>${stackedBar(c, expectedChecks, [["Compliant", "barGreen"], ["Partial", "barAmber"], ["Non-Compliant", "barRed"], ["N/A", "barGray"], ["Not assessed", "barGray"]])}${skipped.length ? `<h3>Skipped Areas</h3><div class="followList">${skipped.map(a => `<div class="followItem"><b>${esc(a.name)}</b> — ${esc(record.areas[a.key].reason)}</div>`).join("")}</div>` : ""}<h3>Findings Requiring Action</h3><div class="followList">${findings.length ? findings.map(r => { const item = obsByKey(r.key); return `<button class="followItem textBtn" data-finding="${esc(r.key)}"><b>${esc(displayArea(r.areaKey))}</b> — ${esc(item?.section || item?.itemId)} — ${esc(r.result)}</button>`; }).join("") : `<div class="muted">No action findings recorded.</div>`}</div>`; document.querySelectorAll("[data-finding]").forEach(b => b.onclick = () => showObservationDetails(obsByKey(b.dataset.finding))); }
+
+// History, menu and data
+async function renderHistory(tab = "interviews") { document.querySelectorAll("[data-historytab]").forEach(b => b.classList.toggle("selected", b.dataset.historytab === tab)); if (tab === "interviews") { const rows = (await idbAll("sessions")).sort((a, b) => String(b.date).localeCompare(String(a.date))); $("historyList").innerHTML = rows.length ? rows.map(s => `<div class="historyCard"><div class="historyTitle">${esc(unitName(s.unit))} • Staff ${esc(s.staffId)}</div><div class="historyMeta">${new Date(s.date).toLocaleString()} • ${esc(roleName(s.role))} • ${esc(s.sourceName)} • ${(s.responses || []).length} questions</div></div>`).join("") : `<div class="notice">No completed interviews yet.</div>`; } else { const rows = (await idbAll("rounds")).sort((a, b) => String(b.completed || b.started).localeCompare(String(a.completed || a.started))), legacy = await idbAll("observations"); $("historyList").innerHTML = rows.length || legacy.length ? rows.map(r => `<div class="historyCard"><div class="historyTitle">${esc(unitName(r.unit))} • Unit Round</div><div class="historyMeta">${new Date(r.completed || r.started).toLocaleString()} • ${Object.keys(r.areas || {}).length} areas</div></div>`).join("") + legacy.map(r => `<div class="historyCard"><div class="historyTitle">${esc(unitName(r.unit))} • ${esc(r.area || "Legacy Area")}</div><div class="historyMeta">Legacy observation • ${new Date(r.date).toLocaleString()}</div></div>`).join("") : `<div class="notice">No completed observation rounds yet.</div>`; } }
+async function openData() { const sessions = await idbAll("sessions"), rounds = await idbAll("rounds"), templates = await idbAll("templates"), legacy = await idbAll("observations"); $("dataSummary").innerHTML = `<b>App</b>: v${APP_VERSION}<br><b>Database</b>: ${esc(master.databaseVersion)}<br><b>Questions</b>: ${master.questions.length}<br><b>Interview sessions</b>: ${sessions.length}<br><b>Observation rounds</b>: ${rounds.length + legacy.length}<br><b>Saved Sessions</b>: ${templates.length}<br><b>Policy verification</b>: ${esc(master.policyVerificationStatus || "Pending")}`; show("dataScreen"); }
+async function exportBackup() { const payload = { app: "JCITracerLocalV06", exported: now(), masterInfo: { schemaVersion: master.schemaVersion, databaseVersion: master.databaseVersion }, reviews: await idbAll("reviews"), staff: await idbAll("staff"), sessions: await idbAll("sessions"), templates: await idbAll("templates"), observations: await idbAll("observations"), rounds: await idbAll("rounds"), activeInterview: (await idbGet("kv", "activeInterview"))?.value || null, activeObservationRound: (await idbGet("kv", "activeObservationRound"))?.value || null }; download(JSON.stringify(payload, null, 2), "application/json", `JCI_Tracer_Backup_${now().slice(0, 10)}.json`); }
+async function restoreBackup(file) { const payload = JSON.parse(await file.text()); if (!["JCITracerLocalV03", "JCITracerLocalV04", "JCITracerLocalV05", "JCITracerLocalV06"].includes(payload.app)) throw new Error("invalid backup"); for (const store of ["reviews", "staff", "sessions", "templates", "observations", "rounds"]) await idbClear(store); for (const x of payload.reviews || []) await idbPut("reviews", x); for (const x of payload.staff || []) await idbPut("staff", x); for (const x of payload.sessions || []) { const y = { ...x }; delete y.id; await idbAdd("sessions", y); } for (const x of payload.templates || []) { const y = { ...x }; delete y.id; await idbAdd("templates", y); } for (const x of payload.observations || []) { const y = { ...x }; delete y.id; await idbAdd("observations", y); } for (const x of payload.rounds || []) await idbPut("rounds", x); await idbPut("kv", { key: "activeInterview", value: payload.activeInterview || null }); await idbPut("kv", { key: "activeObservationRound", value: payload.activeObservationRound || null }); toast("Backup restored"); await renderResumeActions(); }
+async function exportInterviewCsv() { const rows = [["Date", "Unit", "Staff ID", "Role", "Session Type", "Question ID", "Chapter", "Question", "Result", "Note"]]; for (const s of await idbAll("sessions")) for (const r of s.responses || []) { const q = qById(r.qid); rows.push([s.date, unitName(s.unit), s.staffId, s.role, s.sourceName, r.qid, q?.chapter || "", q?.question || "", r.result || "", r.note || ""]); } csv(rows, "JCI_Interview_Results.csv"); }
+async function exportObservationCsv() { const rows = [["Round ID", "Date", "Unit", "Area", "Check ID", "Observation Check", "Result", "Finding", "Standard", "ME"]]; for (const round of await idbAll("rounds")) for (const r of flattenedRound(round)) { const x = obsByKey(r.key); rows.push([round.id, round.completed || round.started, unitName(round.unit), displayArea(r.areaKey), x?.itemId || "", x?.check || "", r.result || "", r.note || "", x?.standards || "", x?.mes || ""]); } csv(rows, "JCI_Observation_Results.csv"); }
+function csv(rows, filename) { download("\ufeff" + rows.map(row => row.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n"), "text/csv;charset=utf-8", filename); }
+function download(content, type, filename) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function openModal(title, body, html = false) { $("modalTitle").textContent = title; $("modalBody").innerHTML = html ? body : esc(body).replace(/\n/g, "<br>"); $("modal").classList.remove("hidden"); }
+function closeModal() { $("modal").classList.add("hidden"); }
+
+// Events
+$("headerBack").onclick = () => history.back();
+$("menuBtn").onclick = () => show("utilityScreen");
+$("startInterview").onclick = () => { renderAllUnitGrids(); show("interviewUnitScreen"); };
+$("startObservation").onclick = () => { renderAllUnitGrids(); show("observationUnitScreen"); };
+document.querySelectorAll(".interviewRole").forEach(button => button.onclick = () => { state.role = button.dataset.role; openInterviewModes(); });
+document.querySelectorAll(".interviewMode").forEach(button => button.onclick = () => chooseMode(button.dataset.mode));
+$("openSavedFromFlow").onclick = async () => { await renderSavedList(); show("savedScreen"); };
+$("openManualFromFlow").onclick = openManualBank;
+$("builderContinue").onclick = async () => { state.requestedCount = Number($("builderCount").value); if (state.mode === "situation" && !state.tags.length) return alert("Choose a patient or situation."); if (state.mode === "chapter" && !state.chapters.length) return alert("Choose at least one chapter."); await prepareGeneratedStart(); };
+$("changeQuestionCount").onclick = () => { openModal("Question Number", [5, 8, 12, 20].map(n => `<button class="choice countChoice" data-count="${n}">${n} Questions</button>`).join(""), true); document.querySelectorAll(".countChoice").forEach(b => b.onclick = () => { state.requestedCount = Number(b.dataset.count); closeModal(); prepareStaffConfirm(true); }); };
+$("staffConfirmStart").onclick = () => guarded(startInterview);
+$("finishInterview").onclick = () => guarded(finishInterview);
+$("bankBack").onclick = () => show("moreInterviewScreen");
+$("bankSearch").oninput = renderBank;
+$("bankChapter").onchange = renderBank;
+$("reviewSelection").onclick = () => { if (!state.bankSelected.length) return alert("Select at least one question."); renderSelection(); show("selectionScreen"); };
+$("selectionBack").onclick = () => show("bankScreen");
+$("startManual").onclick = manualToStaff;
+$("saveAndStart").onclick = saveTemplateAndStart;
+$("savedChange").onclick = () => show("moreInterviewScreen");
+$("nextStaffSameSetup").onclick = () => { state.staffId = ""; state.session = []; state.responses = {}; prepareStaffConfirm(); };
+$("sameStaffNewQuestions").onclick = () => { state.session = []; state.responses = {}; state.pendingStart = null; state.keepStaffNext = true; openInterviewModes(); };
+$("sameUnitNewSetup").onclick = () => { state.role = null; $("interviewRoleHeading").textContent = `${unitName(state.unit)} — Choose Role`; show("interviewRoleScreen"); };
+$("changeInterviewUnit").onclick = () => show("interviewUnitScreen");
+$("reviewInterviewGaps").onclick = () => document.querySelector("[data-gap]")?.click();
+$("obsChangeUnit").onclick = () => show("observationUnitScreen");
+$("completeObservationArea").onclick = () => guarded(completeArea);
+$("nextObservationArea").onclick = nextArea;
+$("chooseObservationArea").onclick = () => { renderObservationAreas(); show("observationAreaScreen"); };
+$("finishRoundFromArea").onclick = () => guarded(finishRound);
+$("changeUnitFromArea").onclick = () => show("observationUnitScreen");
+$("finishObservationRound").onclick = () => guarded(finishRound);
+$("reviewObservationFindings").onclick = () => document.querySelector("[data-finding]")?.click();
+$("continueObservationAreas").onclick = () => { state.obsRound.status = "IN_PROGRESS"; saveRound(); renderObservationAreas(); show("observationAreaScreen"); };
+$("newRoundSameUnit").onclick = async () => { state.obsRound = { id: uid("ROUND"), unit: state.obsUnit, started: now(), status: "IN_PROGRESS", areas: {} }; await saveRound(); renderObservationAreas(); show("observationAreaScreen"); };
+$("chooseAreaSameUnit").onclick = () => { renderObservationAreas(); show("observationAreaScreen"); };
+$("changeObservationUnit").onclick = () => show("observationUnitScreen");
+document.querySelectorAll("[data-home]").forEach(b => b.onclick = goHome);
+$("menuHistory").onclick = async () => { await renderHistory(); show("historyScreen"); };
+$("menuSaved").onclick = () => { alert("Choose an Interview unit and role, then More → Saved Session."); show("interviewUnitScreen"); };
+$("menuBank").onclick = () => { alert("Choose an Interview unit and role, then More → Manual Bank."); show("interviewUnitScreen"); };
+$("menuData").onclick = openData;
+document.querySelectorAll("[data-historytab]").forEach(b => b.onclick = () => renderHistory(b.dataset.historytab));
+$("exportBackupBtn").onclick = exportBackup;
+$("importBackupBtn").onclick = () => $("backupFile").click();
+$("replaceMasterBtn").onclick = () => $("dbFile").click();
+$("exportInterviewCsv").onclick = exportInterviewCsv;
+$("exportObservationCsv").onclick = exportObservationCsv;
+$("importDbBtn").onclick = () => $("dbFile").click();
+$("dbFile").onchange = async e => { try { if (e.target.files[0]) await importMaster(e.target.files[0]); } catch (_) { alert("Invalid v0.7 workflow database."); } e.target.value = ""; };
+$("backupFile").onchange = async e => { try { if (e.target.files[0]) await restoreBackup(e.target.files[0]); } catch (_) { alert("Invalid backup file."); } e.target.value = ""; };
+$("modalClose").onclick = closeModal;
+$("modal").onclick = e => { if (e.target.id === "modal") closeModal(); };
+window.addEventListener("popstate", goBack);
 init();
