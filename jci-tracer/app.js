@@ -1,4 +1,4 @@
-const DB_NAME="JCITracerLocalV03", DB_VERSION=3, APP_VERSION="0.5.0";
+const DB_NAME="JCITracerLocalV03", DB_VERSION=3, APP_VERSION="0.5.1";
 const roleAllowed={SN:["SN"],CN:["SN","CN"],HN:["SN","CN","HN"]};
 let master=null;
 let state={
@@ -30,8 +30,14 @@ function obsByKey(key){return master?.observation?.items?.find(x=>x.key===key)}
 function toast(msg){$('toast').textContent=msg;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),1700)}
 function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
 function takePrioritized(pool,n,asked){const fresh=shuffle(pool.filter(q=>!asked.has(q.id))),old=shuffle(pool.filter(q=>asked.has(q.id)));return [...fresh,...old].slice(0,n)}
-function questionPatientTags(q){return q.patientTags||q.tags||[]}
-function unitPatientTags(unit){return master?.patientTagsByUnit?.[unit]||master?.patientTags||[]}
+// The service menu and interview tags are distinct layers. Keep this alias narrow;
+// legacy generic tags must not turn unrelated questions into situation questions.
+function questionPatientTags(q){return q.patientTags||[]}
+function matchesSituation(q,tag){return questionPatientTags(q).includes(tag)||(tag==='Hemodialysis'&&questionPatientTags(q).includes('Dialysis'))}
+function interviewSituationTags(unit,role){
+  const candidates=master?.patientTagsByUnit?.[unit]||[];
+  return candidates.filter(tag=>master.questions.some(q=>eligibleRole(q,unit,role)&&matchesSituation(q,tag)))
+}
 function observationItems(unit){return (master?.observation?.items||[]).filter(x=>x.unit===unit)}
 function unitReviewKey(unit,qid){return `UNIT|${unit}|${qid}`}
 async function getReview(key){return await idbGet('reviews',key)}
@@ -46,7 +52,7 @@ async function init(){
   if(master){renderAllUnitGrids();show('homeScreen')}else{renderDbStatus();show('setupScreen')}
 }
 function renderDbStatus(){
-  if(!master){$('dbStatus').innerHTML='<b>No pilot database imported yet.</b><br>Choose JCI_Tracer_Workflow_Pilot_DB_v0_6.json.';return}
+  if(!master){$('dbStatus').innerHTML='<b>No pilot database imported yet.</b><br>Choose JCI_Tracer_Workflow_Pilot_DB_v0_6_1.json.';return}
   const obsCount=master.observation?.items?.length||0;
   $('dbStatus').innerHTML=`<b>Database ready</b><br>${escapeHtml(master.databaseVersion)}<br>${master.questionCount} interview questions • ${obsCount} operational observation rows<br><span class="micro">Policy verification: ${escapeHtml(master.policyVerificationStatus||'pending')}</span>`
 }
@@ -102,7 +108,7 @@ async function chooseInterviewMode(mode){
   renderBuilderSelectors();await updateMatchSummary();show('builderScreen')
 }
 function renderBuilderSelectors(){
-  const tags=unitPatientTags(state.unit);
+  const tags=interviewSituationTags(state.unit,state.role);
   for(const target of ['tagGrid','quickTagGrid']){
     $(target).innerHTML=tags.length?tags.map(t=>`<button class="chip builderTag" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join(''):'<div class="muted">No controlled situation options for this unit.</div>'
   }
@@ -119,12 +125,12 @@ async function generatedPool(){
   let p=master.questions.filter(q=>eligibleRole(q,state.unit,state.role));
   if($('hideNotRelevant').checked){const bad=await reviewedNotRelevantIds(state.unit);p=p.filter(q=>!bad.has(q.id))}
   if(state.mode==='general')p=p.filter(q=>q.generalCore&&state.tiers.includes(q.generalCore.tier));
-  if(state.mode==='situation')p=p.filter(q=>state.tags.some(t=>questionPatientTags(q).includes(t)));
+  if(state.mode==='situation')p=p.filter(q=>state.tags.some(t=>matchesSituation(q,t)));
   if(state.mode==='chapter')p=p.filter(q=>state.chapters.includes(q.chapter));
   return p
 }
 async function updateMatchSummary(){
-  if(state.mode==='situation'&&!state.tags.length){$('matchSummary').innerHTML='Select at least one patient/situation.';return}
+  if(state.mode==='situation'&&!state.tags.length){$('matchSummary').innerHTML=interviewSituationTags(state.unit,state.role).length?'Select at least one patient/situation.':'No interview questions are tagged for this unit and role yet. Use General Core, Chapter, or Manual Session.';return}
   if(state.mode==='chapter'&&!state.chapters.length){$('matchSummary').innerHTML='Select at least one chapter.';return}
   const p=await generatedPool(),req=requestedCount();
   if(state.mode==='quick'){
@@ -168,7 +174,7 @@ async function startPendingInterview(){
 }
 function buildQuickBalanced(pool,n,asked){
   const avoid=$('avoidAsked').checked?asked:new Set();const selected=[];const seen=new Set();const add=(arr,k)=>{for(const q of takePrioritized(arr,k,avoid)){if(!seen.has(q.id)){seen.add(q.id);selected.push(q)}}};
-  const situation=state.tags.length?pool.filter(q=>state.tags.some(t=>questionPatientTags(q).includes(t))):[];
+  const situation=state.tags.length?pool.filter(q=>state.tags.some(t=>matchesSituation(q,t))):[];
   const general=pool.filter(q=>q.generalCore);
   const routine=pool.filter(q=>!q.generalCore&&q.scopeStatusByUnit?.[state.unit]?.status==='ACTIVE'&&!questionPatientTags(q).length);
   const situationN=state.tags.length?Math.max(1,Math.round(n*.25)):0;
